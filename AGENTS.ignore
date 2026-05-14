@@ -1,0 +1,10 @@
+# AGENTS.md
+
+## Summary
+
+- Repo extracted from `Vencord-main.zip` into `Vencord-main-fresh`.
+- Copied `src/plugins/hideChannelListShortcuts` from the source working repo.
+
+## Status / Caveat
+
+- Build/install/lint verification was pending at creation time.
