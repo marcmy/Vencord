@@ -39,22 +39,52 @@ function git(...args: string[]) {
     else return execFile("git", args, opts);
 }
 
+async function gitConfig(key: string) {
+    try {
+        return (await git("config", "--get", key)).stdout.trim();
+    } catch {
+        return "";
+    }
+}
+
+function executable(name: string) {
+    return process.platform === "win32" ? `${name}.cmd` : name;
+}
+
+async function getCurrentBranch() {
+    return (await git("branch", "--show-current")).stdout.trim();
+}
+
+async function getUpdateTarget() {
+    const branch = await getCurrentBranch();
+    const remote = await gitConfig(`branch.${branch}.remote`) || "origin";
+    const merge = await gitConfig(`branch.${branch}.merge`);
+    const remoteBranch = merge.replace(/^refs\/heads\//, "") || branch;
+
+    return {
+        remote,
+        remoteBranch,
+        ref: `${remote}/${remoteBranch}`
+    };
+}
+
 async function getRepo() {
-    const res = await git("remote", "get-url", "origin");
+    const { remote } = await getUpdateTarget();
+    const res = await git("remote", "get-url", remote);
     return res.stdout.trim()
         .replace(/git@(.+):/, "https://$1/")
         .replace(/\.git$/, "");
 }
 
 async function calculateGitChanges() {
-    await git("fetch");
+    const { remote, remoteBranch, ref } = await getUpdateTarget();
 
-    const branch = (await git("branch", "--show-current")).stdout.trim();
+    await git("fetch", remote);
 
-    const existsOnOrigin = (await git("ls-remote", "origin", branch)).stdout.length > 0;
-    if (!existsOnOrigin) return [];
+    const existsOnRemote = (await git("ls-remote", remote, remoteBranch)).stdout.length > 0;
+    if (!existsOnRemote) return [];
 
-    const res = await git("log", `HEAD...origin/${branch}`, "--pretty=format:%an/%h/%s");
+    const res = await git("log", `HEAD..${ref}`, "--pretty=format:%an/%h/%s");
 
     const commits = res.stdout.trim();
     return commits ? commits.split("\n").map(line => {
@@ -67,12 +97,18 @@ async function calculateGitChanges() {
 }
 
 async function pull() {
-    const res = await git("pull");
-    return res.stdout.includes("Fast-forward");
+    const { remote, remoteBranch } = await getUpdateTarget();
+    const res = await git("pull", "--rebase", remote, remoteBranch);
+    const output = res.stdout + res.stderr;
+
+    return !/Already up to date|Current branch .* is up to date/.test(output);
 }
 
 async function build() {
     const opts = { cwd: VENCORD_SRC_DIR };
+
+    if (isFlatpak) await execFile("flatpak-spawn", ["--host", "pnpm", "install"], opts);
+    else await execFile(executable("pnpm"), ["install"], opts);
 
     const command = isFlatpak ? "flatpak-spawn" : "node";
     const args = isFlatpak ? ["--host", "node", "scripts/build/build.mjs"] : ["scripts/build/build.mjs"];
