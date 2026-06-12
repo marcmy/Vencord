@@ -7,6 +7,23 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Invoke-NativeStep {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+        [Parameter(Mandatory = $true)]
+        [string]$Command,
+        [string[]]$Arguments = @()
+    )
+
+    Write-Host $Message
+    & $Command @Arguments
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Command failed with exit code $LASTEXITCODE while: $Message"
+    }
+}
+
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Push-Location $repoRoot
 
@@ -15,22 +32,18 @@ try {
         $env:VENCORD_REMOTE = "Vendicated/Vencord"
     }
 
-    Write-Host "Updating from $Remote/$GitBranch..."
-    git pull --rebase $Remote $GitBranch
+    Invoke-NativeStep "Updating from $Remote/$GitBranch..." "git" @("pull", "--rebase", $Remote, $GitBranch)
 
-    Write-Host "Installing dependencies..."
-    pnpm install
+    Invoke-NativeStep "Installing dependencies..." "pnpm" @("install")
 
-    Write-Host "Building Vencord..."
-    pnpm build
+    Invoke-NativeStep "Building Vencord..." "pnpm" @("build")
 
-    $injectArgs = @("-branch", $DiscordBranch)
+    $injectArgs = @("inject", "--", "-branch", $DiscordBranch)
     if (-not $SkipOpenAsar) {
         $injectArgs += "-install-openasar"
     }
 
-    Write-Host "Injecting into Discord $DiscordBranch..."
-    pnpm inject -- @injectArgs
+    Invoke-NativeStep "Injecting into Discord $DiscordBranch..." "pnpm" $injectArgs
 
     Write-Host "Update + build + inject complete."
 } finally {
