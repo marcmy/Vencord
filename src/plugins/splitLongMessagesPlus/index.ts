@@ -9,7 +9,7 @@ import { definePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 import { filters, findAll, findByPropsLazy, moduleListeners } from "@webpack";
-import { DraftStore, DraftType, FluxDispatcher, MessageActions, SelectedChannelStore, UploadAttachmentStore, UploadHandler, UploadManager } from "@webpack/common";
+import { DraftStore, DraftType, FluxDispatcher, Forms, MessageActions, Modal, openModal, React, SelectedChannelStore, UploadAttachmentStore, UploadHandler, UploadManager, useState } from "@webpack/common";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const LEADING_GUARD = "\u200b";
@@ -21,7 +21,6 @@ const LIMIT_OVERRIDE = 2 ** 30;
 const HANDLED_FLAG = "__vencordSplitLongMessagesHandled";
 const WRAPPED_WARNING = Symbol("splitLongMessages.wrappedWarning");
 const WRAPPED_UPLOAD = Symbol("splitLongMessages.wrappedUpload");
-const REHYDRATED_AUTO_TEXT = Symbol("splitLongMessages.rehydratedAutoText");
 const NITRO_UPSELL_TEXT = "Send longer messages with Discord Nitro!";
 
 const DraftManager = findByPropsLazy("clearDraft", "saveDraft");
@@ -93,7 +92,7 @@ function patchUploadTarget(plugin: any, target: Record<string, any>) {
         if (file?.text) {
             void file.text().then((text: string) => {
                 const content = normalizeLineEndings(text);
-                if (content.length > MAX_MESSAGE_LENGTH && plugin.rehydrateDraftText(channelId, content, file)) return;
+                if (content.length > MAX_MESSAGE_LENGTH && plugin.openLongMessageEditor(channelId, content)) return;
                 original(files, channel, draftType);
             }).catch(() => original(files, channel, draftType));
             return;
@@ -101,7 +100,7 @@ function patchUploadTarget(plugin: any, target: Record<string, any>) {
 
         const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
         if (draft.length > MAX_MESSAGE_LENGTH) {
-            plugin.rehydrateDraftText(channelId, draft);
+            plugin.openLongMessageEditor(channelId, draft);
             return;
         }
 
@@ -271,7 +270,7 @@ async function getLongMessageContent(channelId: string, msg: MessageObject, opti
     const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage);
     if (draft?.length > MAX_MESSAGE_LENGTH) return draft;
 
-    const optionUploadText = await readAutoTextUpload(options?.uploads?.find(upload => isAutoTextUpload(upload) && !isRehydratedAutoTextUpload(upload)));
+    const optionUploadText = await readAutoTextUpload(options?.uploads?.find(isAutoTextUpload));
     if (optionUploadText) return optionUploadText;
 
     const liveUploadText = await readAutoTextUpload(getLiveAutoTextUpload(channelId));
@@ -289,22 +288,13 @@ function stripAutoTextUploads(options: MessageOptions | undefined) {
     }
 }
 
-function stripRehydratedAutoTextUploads(options: MessageOptions | undefined) {
-    if (!options?.uploads?.length) return;
-
-    const filtered = options.uploads.filter(upload => !isRehydratedAutoTextUpload(upload));
-    if (filtered.length !== options.uploads.length) {
-        options.uploads = filtered;
-    }
+function hasAutoTextUpload(options: MessageOptions | undefined) {
+    return !!options?.uploads?.some(isAutoTextUpload);
 }
 
-function hasAutoTextUpload(options: MessageOptions | undefined, includeRehydrated = false) {
-    return !!options?.uploads?.some(upload => isAutoTextUpload(upload) && (includeRehydrated || !isRehydratedAutoTextUpload(upload)));
-}
-
-function getLiveAutoTextUpload(channelId: string, includeRehydrated = false) {
+function getLiveAutoTextUpload(channelId: string) {
     const uploads = safeGet(() => UploadAttachmentStore?.getUploads?.(channelId, DraftType.ChannelMessage)) ?? [];
-    return uploads.find(upload => isAutoTextUpload(upload) && (includeRehydrated || !isRehydratedAutoTextUpload(upload)));
+    return uploads.find(isAutoTextUpload);
 }
 
 function hasLiveAutoTextUpload(channelId: string) {
@@ -323,18 +313,6 @@ async function readAutoTextUpload(upload: any) {
     }
 }
 
-function markRehydratedAutoText(value: any) {
-    if (!value || typeof value !== "object") return;
-
-    try {
-        value[REHYDRATED_AUTO_TEXT] = true;
-    } catch { }
-}
-
-function isRehydratedAutoTextUpload(upload: any) {
-    return !!(upload?.[REHYDRATED_AUTO_TEXT] || upload?.item?.file?.[REHYDRATED_AUTO_TEXT]);
-}
-
 function sendFollowUps(channelId: string, baseMessage: MessageObject, options: MessageOptions | undefined, chunks: string[]) {
     if (chunks.length === 0) return;
     const followUpOptions = buildFollowUpOptions(options) ?? {} as any;
@@ -345,6 +323,12 @@ function sendFollowUps(channelId: string, baseMessage: MessageObject, options: M
             content: chunk
         }, followUpOptions);
     }
+}
+
+function clearComposerState(channelId: string) {
+    DraftManager?.clearDraft?.(channelId, DraftType.ChannelMessage);
+    UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage);
+    FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId });
 }
 
 async function sendChunksSequentially(channelId: string, chunks: string[]) {
@@ -392,6 +376,72 @@ function getDraftContent(channelId: string, target?: EventTarget | null) {
     return content;
 }
 
+function LongMessageEditorModal({
+    modalProps,
+    initialText,
+    onClose,
+    onSend
+}: {
+    modalProps: any;
+    initialText: string;
+    onClose(): void;
+    onSend(text: string): void;
+}) {
+    const [text, setText] = useState(initialText);
+    const chunkCount = splitContent(text, MAX_MESSAGE_LENGTH).filter(Boolean).length;
+    const trimmedLength = text.trim().length;
+
+    return React.createElement(
+        Modal,
+        {
+            ...modalProps,
+            onClose,
+            title: "Edit Long Message",
+            size: "lg",
+            actions: [
+                {
+                    text: chunkCount > 1 ? `Send ${chunkCount} Messages` : "Send Message",
+                    variant: "primary",
+                    disabled: trimmedLength === 0,
+                    onClick: () => {
+                        onSend(text);
+                        onClose();
+                    }
+                },
+                {
+                    text: "Cancel",
+                    variant: "secondary",
+                    onClick: onClose
+                }
+            ]
+        },
+        React.createElement(
+            Forms.FormText,
+            { style: { marginBottom: 8 } },
+            `${text.length.toLocaleString()} characters, ${chunkCount.toLocaleString()} message${chunkCount === 1 ? "" : "s"}`
+        ),
+        React.createElement("textarea", {
+            value: text,
+            onChange: (event: Event) => setText((event.target as HTMLTextAreaElement).value),
+            spellCheck: true,
+            style: {
+                width: "100%",
+                minHeight: 420,
+                resize: "vertical",
+                boxSizing: "border-box",
+                color: "var(--text-normal)",
+                background: "var(--input-background)",
+                border: "1px solid var(--input-border)",
+                borderRadius: 4,
+                padding: 10,
+                fontFamily: "var(--font-primary)",
+                fontSize: 14,
+                lineHeight: "20px"
+            }
+        })
+    );
+}
+
 export default definePlugin({
     name: "SplitLongMessagesPlus",
     description: "Splits long messages and includes local UI polish for Discord's long-message composer flow.",
@@ -414,7 +464,8 @@ export default definePlugin({
     originalSendMessage: null as null | ((channelId: string, msg: MessageObject, waitForChannelReady?: boolean, options?: any) => any),
     originalPromptToUploads: [] as Array<{ obj: Record<string, any>; fn: (files: File[], channel: any, draftType: number) => any }>,
     sendingSplit: false,
-    rehydratingDraftChannels: new Set<string>(),
+    openingEditorChannels: new Set<string>(),
+    editorModalChannels: new Set<string>(),
     moduleListener: null as null | ((exports: any) => void),
     uiObserver: null as null | MutationObserver,
     uiPollInterval: null as null | number,
@@ -497,7 +548,7 @@ export default definePlugin({
 
                 event.preventDefault();
                 event.stopImmediatePropagation();
-                void this.sendSplitFromLiveAutoUpload(channelId);
+                void this.openEditorFromLiveAutoUpload(channelId);
                 return;
             }
 
@@ -519,7 +570,7 @@ export default definePlugin({
 
                 event.preventDefault();
                 event.stopImmediatePropagation();
-                void this.sendSplitFromLiveAutoUpload(channelId);
+                void this.openEditorFromLiveAutoUpload(channelId);
                 return;
             }
 
@@ -544,7 +595,7 @@ export default definePlugin({
 
                 event.preventDefault();
                 event.stopImmediatePropagation();
-                void this.sendSplitFromLiveAutoUpload(channelId);
+                void this.openEditorFromLiveAutoUpload(channelId);
                 return;
             }
 
@@ -594,7 +645,8 @@ export default definePlugin({
             }
             this.originalPromptToUploads = [];
         }
-        this.rehydratingDraftChannels.clear();
+        this.openingEditorChannels.clear();
+        this.editorModalChannels.clear();
 
         if (this.originalOpenWarningPopouts.length) {
             for (const { obj, fn } of this.originalOpenWarningPopouts) {
@@ -663,62 +715,47 @@ export default definePlugin({
         }
     },
 
-    trySaveDraftText(channelId: string, text: string) {
-        const saveDraft = safeGet(() => DraftManager?.saveDraft as any);
-        if (typeof saveDraft !== "function") return false;
-
-        const before = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
-
-        const attempts = [
-            () => saveDraft(channelId, DraftType.ChannelMessage, text),
-            () => saveDraft(channelId, text, DraftType.ChannelMessage),
-            () => saveDraft(channelId, text),
-        ];
-
-        for (const attempt of attempts) {
-            try {
-                attempt();
-                const after = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
-                if (after === text || after.length >= text.length) return true;
-            } catch { }
-        }
-
-        return false;
-    },
-
-    rehydrateDraftText(channelId: string, text: string, source?: any) {
+    openLongMessageEditor(channelId: string, text: string) {
         const content = normalizeLineEndings(text);
         if (!content || content.length <= MAX_MESSAGE_LENGTH) return false;
+        if (this.editorModalChannels.has(channelId)) return true;
 
-        const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
-        if (isRehydratedAutoTextUpload(source) && draft !== content) return false;
-
-        if (!this.trySaveDraftText(channelId, content)) return false;
-
-        markRehydratedAutoText(source);
-        markRehydratedAutoText(source?.item?.file);
-        UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage);
+        this.editorModalChannels.add(channelId);
+        clearComposerState(channelId);
         this.restoreUiNodes();
+
+        openModal(modalProps => {
+            const close = () => {
+                this.editorModalChannels.delete(channelId);
+                modalProps.onClose?.();
+            };
+
+            return React.createElement(LongMessageEditorModal, {
+                modalProps,
+                initialText: content,
+                onClose: close,
+                onSend: (editedText: string) => this.sendSplitFromDraft(channelId, editedText)
+            });
+        });
+
         return true;
     },
 
-    rehydrateDraftFromAutoTextUpload(channelId: string) {
-        if (this.rehydratingDraftChannels.has(channelId)) return true;
+    openEditorFromLiveAutoUpload(channelId: string) {
+        if (this.editorModalChannels.has(channelId)) return true;
+        if (this.openingEditorChannels.has(channelId)) return true;
 
-        const uploads = safeGet(() => UploadAttachmentStore?.getUploads?.(channelId, DraftType.ChannelMessage)) ?? [];
-        if (!uploads.length || !uploads.every(isAutoTextUpload)) return false;
+        const upload = getLiveAutoTextUpload(channelId);
+        if (!upload) return false;
 
-        const upload = uploads[0];
-        if (isRehydratedAutoTextUpload(upload)) return false;
-
-        const file = upload?.item?.file;
+        const file = upload.item?.file;
         if (!file?.text) return false;
 
-        this.rehydratingDraftChannels.add(channelId);
+        this.openingEditorChannels.add(channelId);
         void file.text().then((text: string) => {
-            this.rehydrateDraftText(channelId, text, upload);
+            this.openLongMessageEditor(channelId, text);
         }).catch(() => { }).finally(() => {
-            this.rehydratingDraftChannels.delete(channelId);
+            this.openingEditorChannels.delete(channelId);
         });
 
         return true;
@@ -780,7 +817,7 @@ export default definePlugin({
         const onlyAutoText = uploads.length > 0 && uploads.every(isAutoTextUpload);
 
         if (onlyAutoText) {
-            if (this.rehydrateDraftFromAutoTextUpload(channelId)) {
+            if (this.openEditorFromLiveAutoUpload(channelId)) {
                 this.restoreUiNodes();
                 return;
             }
@@ -879,19 +916,11 @@ export default definePlugin({
                 ? props.text
                 : DraftStore.getDraft(channelId, DraftType.ChannelMessage);
 
-        if (hasLiveAutoTextUpload(channelId) || !rawContent || rawContent.length <= MAX_MESSAGE_LENGTH) {
+        if (!rawContent || rawContent.length <= MAX_MESSAGE_LENGTH) {
             return fallback?.(props) ?? { shouldClear: false, shouldRefocus: true };
         }
-        const chunks = splitContent(rawContent, MAX_MESSAGE_LENGTH);
-        if (chunks.length === 0) {
-            return { shouldClear: false, shouldRefocus: true };
-        }
 
-        void sendChunksSequentially(channelId, chunks);
-
-        DraftManager?.clearDraft?.(channelId, DraftType.ChannelMessage);
-        UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage);
-        FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId });
+        this.openLongMessageEditor(channelId, rawContent);
 
         return { shouldClear: false, shouldRefocus: true };
     },
@@ -905,41 +934,22 @@ export default definePlugin({
             if (chunks.length === 0) return;
             void sendChunksSequentially(channelId, chunks);
 
-            DraftManager?.clearDraft?.(channelId, DraftType.ChannelMessage);
-            UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage);
-            FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId });
+            clearComposerState(channelId);
         } finally {
             this.sendingSplit = false;
         }
-    },
-
-    async sendSplitFromLiveAutoUpload(channelId: string) {
-        const content = await readAutoTextUpload(getLiveAutoTextUpload(channelId));
-        if (!content) return;
-
-        this.sendSplitFromDraft(channelId, content);
     },
 
     async onBeforeMessageSend(channelId, msg, options) {
         if (!msg.content && !options?.uploads?.length) return;
         if ((msg as any)[HANDLED_FLAG]) return;
 
-        stripRehydratedAutoTextUploads(options);
-
         const fromAutoTextUpload = hasAutoTextUpload(options) || hasLiveAutoTextUpload(channelId);
         const content = await getLongMessageContent(channelId, msg, options);
         if (content.length <= MAX_MESSAGE_LENGTH) return;
 
         if (fromAutoTextUpload) {
-            const uploads = safeGet(() => UploadAttachmentStore?.getUploads?.(channelId, DraftType.ChannelMessage)) ?? [];
-            const remainingUploads = uploads.filter(u => !isAutoTextUpload(u));
-            if (remainingUploads.length === 0) {
-                UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage);
-            } else {
-                // No granular remove API is exposed in Vencord typings; keep non-auto uploads intact if possible.
-                // We still proceed with a cancel+custom-send, so real attachments won't be sent in this path.
-            }
-            this.sendSplitFromDraft(channelId, content);
+            this.openLongMessageEditor(channelId, content);
             return { cancel: true };
         }
 
