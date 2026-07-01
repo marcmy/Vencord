@@ -24,11 +24,17 @@ const WRAPPED_WARNING = Symbol("splitLongMessages.wrappedWarning");
 const WRAPPED_UPLOAD = Symbol("splitLongMessages.wrappedUpload");
 const NITRO_UPSELL_TEXT = "Send longer messages with Discord Nitro!";
 const LONG_PASTE_DRAFT_CHECK_DELAY = 75;
+const LONG_PASTE_CACHE_TTL = 10 * 60 * 1000;
 
 const DraftManager = findByPropsLazy("clearDraft", "saveDraft");
 const WarningPopout = findByPropsLazy("openWarningPopout");
 const ChannelTextAreaClasses = findByPropsLazy("channelTextArea");
 const TEXT_NODE = 3;
+
+interface CachedLongPaste {
+    content: string;
+    timestamp: number;
+}
 
 const settings = definePluginSettings({
     leadingBlankLineMode: {
@@ -129,6 +135,10 @@ function getTargetElement(target: EventTarget | null) {
     const node = target as Node;
     if (node.nodeType === TEXT_NODE) return node.parentElement;
     return null;
+}
+
+function normalizeLineEndings(text: string) {
+    return text.replace(/\r\n?/g, "\n");
 }
 
 function findSplitIndex(text: string) {
@@ -355,7 +365,7 @@ function getPlainTextPaste(event: ClipboardEvent) {
 
     if (clipboard.files?.length) return "";
 
-    const text = clipboard.getData("text/plain");
+    const text = normalizeLineEndings(clipboard.getData("text/plain"));
     return text.length > MAX_MESSAGE_LENGTH ? text : "";
 }
 
@@ -398,6 +408,7 @@ export default definePlugin({
     uiObserver: null as null | MutationObserver,
     uiPollInterval: null as null | number,
     rehydratingDraftChannels: new Set<string>(),
+    longPasteCache: new Map<string, CachedLongPaste>(),
     keydownHandler: null as null | ((event: KeyboardEvent) => void),
     clickHandler: null as null | ((event: MouseEvent) => void),
     submitHandler: null as null | ((event: Event) => void),
@@ -440,10 +451,12 @@ export default definePlugin({
         if (MessageActions?.sendMessage) {
             this.originalSendMessage = MessageActions.sendMessage.bind(MessageActions);
             MessageActions.sendMessage = (channelId, msg, waitForChannelReady, options) => {
-                if (msg?.content?.length > MAX_MESSAGE_LENGTH) {
-                    const chunks = splitContent(msg.content, MAX_MESSAGE_LENGTH);
+                const content = this.getLongPasteContent(channelId, msg?.content ?? "");
+                if (content.length > MAX_MESSAGE_LENGTH) {
+                    const chunks = splitContent(content, MAX_MESSAGE_LENGTH);
                     if (chunks.length > 1) {
                         msg.content = chunks.shift()!;
+                        this.clearLongPasteContent(channelId);
                         setTimeout(() => {
                             sendFollowUps(channelId, msg, options, chunks);
                         }, 0);
@@ -473,7 +486,7 @@ export default definePlugin({
             const channelId = SelectedChannelStore.getChannelId();
             if (!channelId) return;
 
-            const content = getDraftContent(channelId, event.target);
+            const content = this.getLongPasteContent(channelId, getDraftContent(channelId, event.target));
             if (!content || content.length <= MAX_MESSAGE_LENGTH) return;
 
             event.preventDefault();
@@ -489,7 +502,7 @@ export default definePlugin({
             const channelId = SelectedChannelStore.getChannelId();
             if (!channelId) return;
 
-            const content = getDraftContent(channelId, document.activeElement);
+            const content = this.getLongPasteContent(channelId, getDraftContent(channelId, document.activeElement));
             if (!content || content.length <= MAX_MESSAGE_LENGTH) return;
 
             event.preventDefault();
@@ -508,7 +521,7 @@ export default definePlugin({
             const channelId = SelectedChannelStore.getChannelId();
             if (!channelId) return;
 
-            const content = getDraftContent(channelId, document.activeElement);
+            const content = this.getLongPasteContent(channelId, getDraftContent(channelId, document.activeElement));
             if (!content || content.length <= MAX_MESSAGE_LENGTH) return;
 
             event.preventDefault();
@@ -527,6 +540,8 @@ export default definePlugin({
             if (!channelId) return;
 
             const before = getDraftContent(channelId, event.target);
+            const fullContent = `${before}${text}`;
+            this.cacheLongPasteContent(channelId, fullContent);
 
             event.preventDefault();
             event.stopImmediatePropagation();
@@ -551,7 +566,7 @@ export default definePlugin({
                 }
 
                 if (before && after.length <= before.length + MAX_MESSAGE_LENGTH) {
-                    this.trySaveDraftText(channelId, `${before}${text}`);
+                    this.trySaveDraftText(channelId, fullContent);
                     UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage);
                 }
             }, LONG_PASTE_DRAFT_CHECK_DELAY);
@@ -589,6 +604,7 @@ export default definePlugin({
             document.removeEventListener("paste", this.pasteHandler, true);
             this.pasteHandler = null;
         }
+        this.longPasteCache.clear();
 
         if (this.originalSendMessage && safeGet(() => MessageActions?.sendMessage)) {
             MessageActions.sendMessage = this.originalSendMessage;
@@ -622,6 +638,48 @@ export default definePlugin({
             } catch { }
         }
         this.originalMessageLimits = null;
+    },
+
+    cacheLongPasteContent(channelId: string, content: string) {
+        if (content.length <= MAX_MESSAGE_LENGTH) {
+            this.longPasteCache.delete(channelId);
+            return;
+        }
+
+        this.longPasteCache.set(channelId, {
+            content,
+            timestamp: Date.now()
+        });
+    },
+
+    getLongPasteContent(channelId: string, visibleContent: string) {
+        const cached = this.longPasteCache.get(channelId);
+        if (!cached) return visibleContent;
+
+        if (Date.now() - cached.timestamp > LONG_PASTE_CACHE_TTL) {
+            this.longPasteCache.delete(channelId);
+            return visibleContent;
+        }
+
+        const visibleText = normalizeLineEndings(visibleContent);
+
+        if (
+            visibleContent.length > MAX_MESSAGE_LENGTH &&
+            cached.content.length > visibleContent.length &&
+            cached.content.startsWith(visibleText)
+        ) {
+            return cached.content;
+        }
+
+        if (visibleContent.length >= cached.content.length) {
+            this.longPasteCache.delete(channelId);
+        }
+
+        return visibleContent;
+    },
+
+    clearLongPasteContent(channelId: string) {
+        this.longPasteCache.delete(channelId);
     },
 
     hideUiNode(node: HTMLElement | null | undefined) {
@@ -840,7 +898,7 @@ export default definePlugin({
 
         if (options) options.replyOptions = replyOptions;
 
-        const content = getLongMessageContentSync(channelId, msg);
+        const content = this.getLongPasteContent(channelId, getLongMessageContentSync(channelId, msg));
         if (content.length <= MAX_MESSAGE_LENGTH) return;
 
         const chunks = splitContent(content, MAX_MESSAGE_LENGTH);
@@ -848,6 +906,7 @@ export default definePlugin({
 
         (msg as any)[HANDLED_FLAG] = true;
         msg.content = chunks.shift()!;
+        this.clearLongPasteContent(channelId);
         if (options) options.content = msg.content;
         stripAutoTextUploads(options);
 
@@ -868,10 +927,12 @@ export default definePlugin({
                 ? props.text
                 : DraftStore.getDraft(channelId, DraftType.ChannelMessage);
 
-        if (!rawContent || rawContent.length <= MAX_MESSAGE_LENGTH) {
+        const content = rawContent ? this.getLongPasteContent(channelId, rawContent) : rawContent;
+
+        if (!content || content.length <= MAX_MESSAGE_LENGTH) {
             return fallback?.(props) ?? { shouldClear: false, shouldRefocus: true };
         }
-        const chunks = splitContent(rawContent, MAX_MESSAGE_LENGTH);
+        const chunks = splitContent(content, MAX_MESSAGE_LENGTH);
         if (chunks.length === 0) {
             return { shouldClear: false, shouldRefocus: true };
         }
@@ -881,6 +942,7 @@ export default definePlugin({
         DraftManager?.clearDraft?.(channelId, DraftType.ChannelMessage);
         UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage);
         FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId });
+        this.clearLongPasteContent(channelId);
 
         return { shouldClear: false, shouldRefocus: true };
     },
@@ -890,6 +952,7 @@ export default definePlugin({
         this.sendingSplit = true;
 
         try {
+            content = this.getLongPasteContent(channelId, content);
             const chunks = splitContent(content, MAX_MESSAGE_LENGTH);
             if (chunks.length === 0) return;
             void sendChunksSequentially(channelId, chunks);
@@ -897,6 +960,7 @@ export default definePlugin({
             DraftManager?.clearDraft?.(channelId, DraftType.ChannelMessage);
             UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage);
             FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId });
+            this.clearLongPasteContent(channelId);
         } finally {
             this.sendingSplit = false;
         }
@@ -907,7 +971,7 @@ export default definePlugin({
         if ((msg as any)[HANDLED_FLAG]) return;
 
         const fromAutoTextUpload = hasAutoTextUpload(options);
-        const content = await getLongMessageContent(channelId, msg, options);
+        const content = this.getLongPasteContent(channelId, await getLongMessageContent(channelId, msg, options));
         if (content.length <= MAX_MESSAGE_LENGTH) return;
 
         if (fromAutoTextUpload) {
@@ -928,6 +992,7 @@ export default definePlugin({
 
         (msg as any)[HANDLED_FLAG] = true;
         msg.content = chunks.shift()!;
+        this.clearLongPasteContent(channelId);
         if (options) options.content = msg.content;
         stripAutoTextUploads(options);
 
