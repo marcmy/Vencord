@@ -28,10 +28,6 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Push-Location $repoRoot
 
 try {
-    if (-not $env:VENCORD_REMOTE) {
-        $env:VENCORD_REMOTE = "Vendicated/Vencord"
-    }
-
     Invoke-NativeStep "Updating from $Remote/$GitBranch..." "git" @("pull", "--rebase", $Remote, $GitBranch)
 
     Invoke-NativeStep "Installing dependencies..." "pnpm" @("install")
