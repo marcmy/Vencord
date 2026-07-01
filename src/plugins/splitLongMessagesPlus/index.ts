@@ -480,7 +480,12 @@ export default definePlugin({
 
             const channelId = SelectedChannelStore.getChannelId();
             if (!channelId) return;
-            if (hasLiveAutoTextUpload(channelId)) return;
+            if (hasLiveAutoTextUpload(channelId)) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                void this.sendSplitFromLiveAutoUpload(channelId);
+                return;
+            }
 
             const content = getDraftContent(channelId, event.target);
             if (!content || content.length <= MAX_MESSAGE_LENGTH) return;
@@ -497,7 +502,12 @@ export default definePlugin({
 
             const channelId = SelectedChannelStore.getChannelId();
             if (!channelId) return;
-            if (hasLiveAutoTextUpload(channelId)) return;
+            if (hasLiveAutoTextUpload(channelId)) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                void this.sendSplitFromLiveAutoUpload(channelId);
+                return;
+            }
 
             const content = getDraftContent(channelId, document.activeElement);
             if (!content || content.length <= MAX_MESSAGE_LENGTH) return;
@@ -517,7 +527,12 @@ export default definePlugin({
 
             const channelId = SelectedChannelStore.getChannelId();
             if (!channelId) return;
-            if (hasLiveAutoTextUpload(channelId)) return;
+            if (hasLiveAutoTextUpload(channelId)) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                void this.sendSplitFromLiveAutoUpload(channelId);
+                return;
+            }
 
             const content = getDraftContent(channelId, document.activeElement);
             if (!content || content.length <= MAX_MESSAGE_LENGTH) return;
@@ -716,7 +731,10 @@ export default definePlugin({
 
         if (onlyAutoText) {
             const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
-            if (!draft) return;
+            if (!draft) {
+                this.restoreUiNodes();
+                return;
+            }
 
             for (const el of composerRoot.querySelectorAll<HTMLElement>("button,[role='button']")) {
                 const aria = (el.getAttribute("aria-label") ?? "").toLowerCase();
@@ -839,6 +857,13 @@ export default definePlugin({
         } finally {
             this.sendingSplit = false;
         }
+    },
+
+    async sendSplitFromLiveAutoUpload(channelId: string) {
+        const content = await readAutoTextUpload(getLiveAutoTextUpload(channelId));
+        if (!content) return;
+
+        this.sendSplitFromDraft(channelId, content);
     },
 
     async onBeforeMessageSend(channelId, msg, options) {
