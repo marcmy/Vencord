@@ -57,6 +57,15 @@ async function getCurrentBranch() {
 
 async function getUpdateTarget() {
     const branch = await getCurrentBranch();
+    const pushRemote = await gitConfig(`branch.${branch}.pushRemote`);
+    if (pushRemote) {
+        return {
+            remote: pushRemote,
+            remoteBranch: branch,
+            ref: `${pushRemote}/${branch}`
+        };
+    }
+
     const remote = await gitConfig(`branch.${branch}.remote`) || "origin";
     const merge = await gitConfig(`branch.${branch}.merge`);
     const remoteBranch = merge.replace(/^refs\/heads\//, "") || branch;
