@@ -21,6 +21,7 @@ const LIMIT_OVERRIDE = 2 ** 30;
 const HANDLED_FLAG = "__vencordSplitLongMessagesHandled";
 const WRAPPED_WARNING = Symbol("splitLongMessages.wrappedWarning");
 const WRAPPED_UPLOAD = Symbol("splitLongMessages.wrappedUpload");
+const REHYDRATED_AUTO_TEXT = Symbol("splitLongMessages.rehydratedAutoText");
 const NITRO_UPSELL_TEXT = "Send longer messages with Discord Nitro!";
 
 const DraftManager = findByPropsLazy("clearDraft", "saveDraft");
@@ -89,30 +90,18 @@ function patchUploadTarget(plugin: any, target: Record<string, any>) {
             return original(files, channel, draftType);
         }
 
-        const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
-
-        const sendMaybeSplit = (text: string) => {
-            const content = text.length > draft.length ? text : draft;
-            if (content.length > MAX_MESSAGE_LENGTH) {
-                plugin.sendSplitFromDraft(channelId, content);
-                return;
-            }
-            return original(files, channel, draftType);
-        };
-
         if (file?.text) {
-            void file.text().then(sendMaybeSplit).catch(() => {
-                if (draft.length > MAX_MESSAGE_LENGTH) {
-                    plugin.sendSplitFromDraft(channelId, draft);
-                    return;
-                }
+            void file.text().then((text: string) => {
+                const content = normalizeLineEndings(text);
+                if (content.length > MAX_MESSAGE_LENGTH && plugin.rehydrateDraftText(channelId, content, file)) return;
                 original(files, channel, draftType);
-            });
+            }).catch(() => original(files, channel, draftType));
             return;
         }
 
+        const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
         if (draft.length > MAX_MESSAGE_LENGTH) {
-            plugin.sendSplitFromDraft(channelId, draft);
+            plugin.rehydrateDraftText(channelId, draft);
             return;
         }
 
@@ -277,16 +266,16 @@ function isAutoTextFile(file: File | undefined) {
 }
 
 async function getLongMessageContent(channelId: string, msg: MessageObject, options: MessageOptions | undefined) {
-    const optionUploadText = await readAutoTextUpload(options?.uploads?.find(isAutoTextUpload));
-    if (optionUploadText) return optionUploadText;
-
-    const liveUploadText = await readAutoTextUpload(getLiveAutoTextUpload(channelId));
-    if (liveUploadText) return liveUploadText;
-
     if (msg.content.length > MAX_MESSAGE_LENGTH) return msg.content;
 
     const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage);
     if (draft?.length > MAX_MESSAGE_LENGTH) return draft;
+
+    const optionUploadText = await readAutoTextUpload(options?.uploads?.find(upload => isAutoTextUpload(upload) && !isRehydratedAutoTextUpload(upload)));
+    if (optionUploadText) return optionUploadText;
+
+    const liveUploadText = await readAutoTextUpload(getLiveAutoTextUpload(channelId));
+    if (liveUploadText) return liveUploadText;
 
     return msg.content;
 }
@@ -300,13 +289,22 @@ function stripAutoTextUploads(options: MessageOptions | undefined) {
     }
 }
 
-function hasAutoTextUpload(options: MessageOptions | undefined) {
-    return !!options?.uploads?.some(isAutoTextUpload);
+function stripRehydratedAutoTextUploads(options: MessageOptions | undefined) {
+    if (!options?.uploads?.length) return;
+
+    const filtered = options.uploads.filter(upload => !isRehydratedAutoTextUpload(upload));
+    if (filtered.length !== options.uploads.length) {
+        options.uploads = filtered;
+    }
 }
 
-function getLiveAutoTextUpload(channelId: string) {
+function hasAutoTextUpload(options: MessageOptions | undefined, includeRehydrated = false) {
+    return !!options?.uploads?.some(upload => isAutoTextUpload(upload) && (includeRehydrated || !isRehydratedAutoTextUpload(upload)));
+}
+
+function getLiveAutoTextUpload(channelId: string, includeRehydrated = false) {
     const uploads = safeGet(() => UploadAttachmentStore?.getUploads?.(channelId, DraftType.ChannelMessage)) ?? [];
-    return uploads.find(isAutoTextUpload);
+    return uploads.find(upload => isAutoTextUpload(upload) && (includeRehydrated || !isRehydratedAutoTextUpload(upload)));
 }
 
 function hasLiveAutoTextUpload(channelId: string) {
@@ -323,6 +321,18 @@ async function readAutoTextUpload(upload: any) {
     } catch {
         return "";
     }
+}
+
+function markRehydratedAutoText(value: any) {
+    if (!value || typeof value !== "object") return;
+
+    try {
+        value[REHYDRATED_AUTO_TEXT] = true;
+    } catch { }
+}
+
+function isRehydratedAutoTextUpload(upload: any) {
+    return !!(upload?.[REHYDRATED_AUTO_TEXT] || upload?.item?.file?.[REHYDRATED_AUTO_TEXT]);
 }
 
 function sendFollowUps(channelId: string, baseMessage: MessageObject, options: MessageOptions | undefined, chunks: string[]) {
@@ -404,6 +414,7 @@ export default definePlugin({
     originalSendMessage: null as null | ((channelId: string, msg: MessageObject, waitForChannelReady?: boolean, options?: any) => any),
     originalPromptToUploads: [] as Array<{ obj: Record<string, any>; fn: (files: File[], channel: any, draftType: number) => any }>,
     sendingSplit: false,
+    rehydratingDraftChannels: new Set<string>(),
     moduleListener: null as null | ((exports: any) => void),
     uiObserver: null as null | MutationObserver,
     uiPollInterval: null as null | number,
@@ -448,7 +459,7 @@ export default definePlugin({
         if (MessageActions?.sendMessage) {
             this.originalSendMessage = MessageActions.sendMessage.bind(MessageActions);
             MessageActions.sendMessage = (channelId, msg, waitForChannelReady, options) => {
-                if (!hasLiveAutoTextUpload(channelId) && msg?.content?.length > MAX_MESSAGE_LENGTH) {
+                if (msg?.content?.length > MAX_MESSAGE_LENGTH) {
                     const chunks = splitContent(msg.content, MAX_MESSAGE_LENGTH);
                     if (chunks.length > 1) {
                         msg.content = chunks.shift()!;
@@ -480,15 +491,15 @@ export default definePlugin({
 
             const channelId = SelectedChannelStore.getChannelId();
             if (!channelId) return;
-            if (hasLiveAutoTextUpload(channelId)) {
+            const content = getDraftContent(channelId, event.target);
+            if (!content || content.length <= MAX_MESSAGE_LENGTH) {
+                if (!hasLiveAutoTextUpload(channelId)) return;
+
                 event.preventDefault();
                 event.stopImmediatePropagation();
                 void this.sendSplitFromLiveAutoUpload(channelId);
                 return;
             }
-
-            const content = getDraftContent(channelId, event.target);
-            if (!content || content.length <= MAX_MESSAGE_LENGTH) return;
 
             event.preventDefault();
             event.stopImmediatePropagation();
@@ -502,15 +513,15 @@ export default definePlugin({
 
             const channelId = SelectedChannelStore.getChannelId();
             if (!channelId) return;
-            if (hasLiveAutoTextUpload(channelId)) {
+            const content = getDraftContent(channelId, document.activeElement);
+            if (!content || content.length <= MAX_MESSAGE_LENGTH) {
+                if (!hasLiveAutoTextUpload(channelId)) return;
+
                 event.preventDefault();
                 event.stopImmediatePropagation();
                 void this.sendSplitFromLiveAutoUpload(channelId);
                 return;
             }
-
-            const content = getDraftContent(channelId, document.activeElement);
-            if (!content || content.length <= MAX_MESSAGE_LENGTH) return;
 
             event.preventDefault();
             event.stopImmediatePropagation();
@@ -527,15 +538,15 @@ export default definePlugin({
 
             const channelId = SelectedChannelStore.getChannelId();
             if (!channelId) return;
-            if (hasLiveAutoTextUpload(channelId)) {
+            const content = getDraftContent(channelId, document.activeElement);
+            if (!content || content.length <= MAX_MESSAGE_LENGTH) {
+                if (!hasLiveAutoTextUpload(channelId)) return;
+
                 event.preventDefault();
                 event.stopImmediatePropagation();
                 void this.sendSplitFromLiveAutoUpload(channelId);
                 return;
             }
-
-            const content = getDraftContent(channelId, document.activeElement);
-            if (!content || content.length <= MAX_MESSAGE_LENGTH) return;
 
             event.preventDefault();
             event.stopImmediatePropagation();
@@ -583,6 +594,7 @@ export default definePlugin({
             }
             this.originalPromptToUploads = [];
         }
+        this.rehydratingDraftChannels.clear();
 
         if (this.originalOpenWarningPopouts.length) {
             for (const { obj, fn } of this.originalOpenWarningPopouts) {
@@ -674,6 +686,44 @@ export default definePlugin({
         return false;
     },
 
+    rehydrateDraftText(channelId: string, text: string, source?: any) {
+        const content = normalizeLineEndings(text);
+        if (!content || content.length <= MAX_MESSAGE_LENGTH) return false;
+
+        const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
+        if (isRehydratedAutoTextUpload(source) && draft !== content) return false;
+
+        if (!this.trySaveDraftText(channelId, content)) return false;
+
+        markRehydratedAutoText(source);
+        markRehydratedAutoText(source?.item?.file);
+        UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage);
+        this.restoreUiNodes();
+        return true;
+    },
+
+    rehydrateDraftFromAutoTextUpload(channelId: string) {
+        if (this.rehydratingDraftChannels.has(channelId)) return true;
+
+        const uploads = safeGet(() => UploadAttachmentStore?.getUploads?.(channelId, DraftType.ChannelMessage)) ?? [];
+        if (!uploads.length || !uploads.every(isAutoTextUpload)) return false;
+
+        const upload = uploads[0];
+        if (isRehydratedAutoTextUpload(upload)) return false;
+
+        const file = upload?.item?.file;
+        if (!file?.text) return false;
+
+        this.rehydratingDraftChannels.add(channelId);
+        void file.text().then((text: string) => {
+            this.rehydrateDraftText(channelId, text, upload);
+        }).catch(() => { }).finally(() => {
+            this.rehydratingDraftChannels.delete(channelId);
+        });
+
+        return true;
+    },
+
     restoreUiNodes() {
         for (const node of document.querySelectorAll<HTMLElement>("[data-slm-hidden='1']")) {
             const prev = node.dataset.slmPrevDisplay;
@@ -730,6 +780,11 @@ export default definePlugin({
         const onlyAutoText = uploads.length > 0 && uploads.every(isAutoTextUpload);
 
         if (onlyAutoText) {
+            if (this.rehydrateDraftFromAutoTextUpload(channelId)) {
+                this.restoreUiNodes();
+                return;
+            }
+
             const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
             if (!draft) {
                 this.restoreUiNodes();
@@ -793,7 +848,6 @@ export default definePlugin({
     handleEarlySplit(channelId: string, msg: MessageObject, options: MessageOptions | undefined, replyOptions: MessageOptions["replyOptions"]) {
         if (!msg.content && !options?.uploads?.length) return;
         if ((msg as any)[HANDLED_FLAG]) return;
-        if (hasAutoTextUpload(options) || hasLiveAutoTextUpload(channelId)) return;
 
         if (options) options.replyOptions = replyOptions;
 
@@ -869,6 +923,8 @@ export default definePlugin({
     async onBeforeMessageSend(channelId, msg, options) {
         if (!msg.content && !options?.uploads?.length) return;
         if ((msg as any)[HANDLED_FLAG]) return;
+
+        stripRehydratedAutoTextUploads(options);
 
         const fromAutoTextUpload = hasAutoTextUpload(options) || hasLiveAutoTextUpload(channelId);
         const content = await getLongMessageContent(channelId, msg, options);
