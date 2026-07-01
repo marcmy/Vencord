@@ -38,7 +38,7 @@ try {
 
     Invoke-NativeStep "Building Vencord..." "pnpm" @("build")
 
-    $injectArgs = @("inject", "--", "-branch", $DiscordBranch)
+    $injectArgs = @("inject", "-branch", $DiscordBranch)
     if (-not $SkipOpenAsar) {
         $injectArgs += "-install-openasar"
     }
