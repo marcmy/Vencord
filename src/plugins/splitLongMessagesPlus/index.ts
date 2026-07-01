@@ -7,6 +7,7 @@
 import { MessageObject, MessageOptions } from "@api/MessageEvents";
 import { definePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
+import { insertTextIntoChatInputBox } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
 import { filters, findAll, findByPropsLazy, moduleListeners } from "@webpack";
 import { DraftStore, DraftType, FluxDispatcher, MessageActions, SelectedChannelStore, UploadAttachmentStore, UploadHandler, UploadManager } from "@webpack/common";
@@ -22,6 +23,7 @@ const HANDLED_FLAG = "__vencordSplitLongMessagesHandled";
 const WRAPPED_WARNING = Symbol("splitLongMessages.wrappedWarning");
 const WRAPPED_UPLOAD = Symbol("splitLongMessages.wrappedUpload");
 const NITRO_UPSELL_TEXT = "Send longer messages with Discord Nitro!";
+const LONG_PASTE_DRAFT_CHECK_DELAY = 75;
 
 const DraftManager = findByPropsLazy("clearDraft", "saveDraft");
 const WarningPopout = findByPropsLazy("openWarningPopout");
@@ -347,11 +349,21 @@ function isChatInputTarget(target: EventTarget | null) {
     return el instanceof HTMLTextAreaElement;
 }
 
+function getPlainTextPaste(event: ClipboardEvent) {
+    const clipboard = event.clipboardData;
+    if (!clipboard) return "";
+
+    if (clipboard.files?.length) return "";
+
+    const text = clipboard.getData("text/plain");
+    return text.length > MAX_MESSAGE_LENGTH ? text : "";
+}
+
 function getDraftContent(channelId: string, target?: EventTarget | null) {
     let content = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
     if (content.length > MAX_MESSAGE_LENGTH) return content;
 
-        const el = getTargetElement(target ?? null) ?? (document.activeElement as HTMLElement | null);
+    const el = getTargetElement(target ?? null) ?? (document.activeElement as HTMLElement | null);
     if (el?.isContentEditable) {
         const text = el.innerText ?? el.textContent ?? "";
         if (text.length > content.length) content = text;
@@ -389,6 +401,7 @@ export default definePlugin({
     keydownHandler: null as null | ((event: KeyboardEvent) => void),
     clickHandler: null as null | ((event: MouseEvent) => void),
     submitHandler: null as null | ((event: Event) => void),
+    pasteHandler: null as null | ((event: ClipboardEvent) => void),
 
     start() {
         const updated: Array<{ mod: Record<string, any>; key: string; value: number }> = [];
@@ -504,9 +517,50 @@ export default definePlugin({
             this.sendSplitFromDraft(channelId, content);
         };
 
+        this.pasteHandler = event => {
+            if (!isChatInputTarget(event.target)) return;
+
+            const text = getPlainTextPaste(event);
+            if (!text) return;
+
+            const channelId = SelectedChannelStore.getChannelId();
+            if (!channelId) return;
+
+            const before = getDraftContent(channelId, event.target);
+
+            event.preventDefault();
+            event.stopImmediatePropagation();
+
+            if (!before) {
+                if (this.trySaveDraftText(channelId, text)) {
+                    UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage);
+                    return;
+                }
+            }
+
+            insertTextIntoChatInputBox(text);
+
+            setTimeout(() => {
+                const after = getDraftContent(channelId, event.target);
+                if (after.length >= before.length + text.length || after.includes(text)) return;
+
+                if (!before && text.startsWith(after)) {
+                    this.trySaveDraftText(channelId, text);
+                    UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage);
+                    return;
+                }
+
+                if (before && after.length <= before.length + MAX_MESSAGE_LENGTH) {
+                    this.trySaveDraftText(channelId, `${before}${text}`);
+                    UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage);
+                }
+            }, LONG_PASTE_DRAFT_CHECK_DELAY);
+        };
+
         document.addEventListener("keydown", this.keydownHandler, true);
         document.addEventListener("click", this.clickHandler, true);
         document.addEventListener("submit", this.submitHandler, true);
+        document.addEventListener("paste", this.pasteHandler, true);
 
         this.startUiPolish();
     },
@@ -530,6 +584,10 @@ export default definePlugin({
         if (this.submitHandler) {
             document.removeEventListener("submit", this.submitHandler, true);
             this.submitHandler = null;
+        }
+        if (this.pasteHandler) {
+            document.removeEventListener("paste", this.pasteHandler, true);
+            this.pasteHandler = null;
         }
 
         if (this.originalSendMessage && safeGet(() => MessageActions?.sendMessage)) {
@@ -628,7 +686,7 @@ export default definePlugin({
             try {
                 attempt();
                 const after = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
-                if (after === text || after.length > before.length) return true;
+                if (after === text || after.length >= text.length) return true;
             } catch { }
         }
 
