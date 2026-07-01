@@ -370,7 +370,7 @@ export default definePlugin({
         {
             find: ".handleSendMessage,onResize:",
             replacement: {
-                match: /let (\i)=\i\.\i\.parse\((\i),.+?\.getSendMessageOptions\(\{.+?\}\);(?=.+?(\i)\.flags=)(?<=\)\(({.+?})\)\.then.+?)/,
+                match: /let (\i)=\i\.\i\.parse\((\i),.+?\.getSendMessageOptions\(\{.+?\}\)?;(?=.+?(\i)\.flags=)(?<=\)\((\{.+?})\)\.then.+?)/,
                 replace: (m, parsedMessage, channel, replyOptions, extra) =>
                     `${m}$self.handleEarlySplit(${channel}.id,${parsedMessage},${extra},${replyOptions});`
             }
