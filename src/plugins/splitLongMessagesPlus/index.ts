@@ -716,10 +716,7 @@ export default definePlugin({
 
         if (onlyAutoText) {
             const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
-            if (!draft) {
-                UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage);
-                return;
-            }
+            if (!draft) return;
 
             for (const el of composerRoot.querySelectorAll<HTMLElement>("button,[role='button']")) {
                 const aria = (el.getAttribute("aria-label") ?? "").toLowerCase();
