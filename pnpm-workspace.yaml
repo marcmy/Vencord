@@ -1,5 +1,8 @@
 packages:
   - packages/*
+overrides:
+  'dompurify@<3.4.11': 3.4.11
+  'minimatch@<3.1.5': 3.1.5
 patchedDependencies:
   eslint-plugin-path-alias@2.1.0: patches/eslint-plugin-path-alias@2.1.0.patch
 peerDependencyRules:
