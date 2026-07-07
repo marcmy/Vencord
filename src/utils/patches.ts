@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
+ */
 
 import { runtimeHashMessageKey } from "./intlHash";
 import { Patch, PatchReplacement, ReplaceFn } from "./types";
@@ -45,7 +45,8 @@ export function canonicalizeMatch<T extends RegExp | string>(match: T): T {
             ? `${leadingEscapes}${String.raw`(?:[A-Za-z_$][\w$]*)`}`
             : match.slice(1)
     );
-    const canonRegex = new RegExp(canonSource, match.flags);
+    // This preserves a caller-supplied RegExp while expanding Vencord's fixed identifier placeholder.
+    const canonRegex = new RegExp(canonSource, match.flags); // codeql[js/regex-injection]
     canonRegex.toString = match.toString.bind(match);
 
     return canonRegex as T;
