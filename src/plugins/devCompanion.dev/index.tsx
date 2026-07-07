@@ -82,15 +82,15 @@ function parseNode(node: Node) {
             if (pattern.length > MAX_DYNAMIC_SOURCE_LENGTH) throw new Error("Regex source is too long");
             if (!VALID_REGEX_FLAGS.test(flags) || new Set(flags).size !== flags.length) throw new Error("Invalid regex flags");
 
-            // Dev Companion is a developer-only localhost protocol whose purpose is testing developer-authored regexes. codeql[js/regex-injection]
-            return new RegExp(pattern, flags);
+            // Dev Companion is a developer-only localhost protocol whose purpose is testing developer-authored regexes.
+            return new RegExp(pattern, flags); // codeql[js/regex-injection]
         }
         case "function":
             if (node.value.length > MAX_DYNAMIC_SOURCE_LENGTH) throw new Error("Function source is too long");
 
             // Dev Companion is a developer-only localhost protocol whose purpose includes testing replacement functions.
-            // The evaluated function runs in Discord's browser sandbox; the companion process already has host access. codeql[js/code-injection]
-            return (0, eval)(node.value);
+            // The evaluated function runs in Discord's browser sandbox; the companion process already has host access.
+            return (0, eval)(node.value); // codeql[js/code-injection]
         default:
             throw new Error("Unknown Node Type " + (node as any).type);
     }

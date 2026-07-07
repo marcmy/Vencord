@@ -46,8 +46,7 @@ export function canonicalizeMatch<T extends RegExp | string>(match: T): T {
             : match.slice(1)
     );
     // The input is a RegExp supplied by trusted plugin/developer code; only Vencord's fixed placeholder is expanded.
-    // lgtm[js/regex-injection]
-    const canonRegex = new RegExp(canonSource, match.flags);
+    const canonRegex = new RegExp(canonSource, match.flags); // codeql[js/regex-injection]
     canonRegex.toString = match.toString.bind(match);
 
     return canonRegex as T;
