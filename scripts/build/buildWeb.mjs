@@ -15,14 +15,14 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
+ */
 
 // @ts-check
 
 import { readFileSync } from "fs";
 import { appendFile, mkdir, readdir, readFile, rm, writeFile } from "fs/promises";
+import { zipSync } from "fflate";
 import { join } from "path";
-import Zip from "zip-local";
 
 import { BUILD_TIMESTAMP, commonOpts, globPlugins, IS_DEV, IS_REPORTER, IS_ANTI_CRASH_TEST, VERSION, commonRendererPlugins, buildOrWatchAll, stringifyValues } from "./common.mjs";
 
@@ -134,7 +134,7 @@ async function globDir(dir) {
 }
 
 /**
- * @type {(dir: string, basePath?: string) => Promise<Record<string, string>>}
+ * @type {(dir: string, basePath?: string) => Promise<Record<string, Buffer>>}
  */
 async function loadDir(dir, basePath = "") {
     const files = await globDir(dir);
@@ -142,9 +142,9 @@ async function loadDir(dir, basePath = "") {
 }
 
 /**
-  * @type {(target: string, files: string[]) => Promise<void>}
+ * @type {(target: string, archive: string, files: string[]) => Promise<void>}
  */
-async function buildExtension(target, files) {
+async function buildExtension(target, archive, files) {
     const entries = {
         "dist/Vencord.js": await readFile("dist/extension.js"),
         "dist/Vencord.css": await readFile("dist/extension.css"),
@@ -173,6 +173,9 @@ async function buildExtension(target, files) {
     }));
 
     console.info("Unpacked Extension written to dist/" + target);
+
+    await writeFile(join("dist", archive), zipSync(entries, { level: 9 }));
+    console.info("Packed Extension written to dist/" + archive);
 }
 
 const appendCssRuntime = readFile("dist/Vencord.user.css", "utf-8").then(content => {
@@ -184,15 +187,9 @@ const appendCssRuntime = readFile("dist/Vencord.user.css", "utf-8").then(content
 if (!process.argv.includes("--skip-extension")) {
     await Promise.all([
         appendCssRuntime,
-        buildExtension("chromium-unpacked", ["modifyResponseHeaders.json", "content.js", "manifest.json", "icon.png"]),
-        buildExtension("firefox-unpacked", ["background.js", "content.js", "manifestv2.json", "icon.png"]),
+        buildExtension("chromium-unpacked", "extension-chrome.zip", ["modifyResponseHeaders.json", "content.js", "manifest.json", "icon.png"]),
+        buildExtension("firefox-unpacked", "extension-firefox.zip", ["background.js", "content.js", "manifestv2.json", "icon.png"]),
     ]);
-
-    Zip.sync.zip("dist/chromium-unpacked").compress().save("dist/extension-chrome.zip");
-    console.info("Packed Chromium Extension written to dist/extension-chrome.zip");
-
-    Zip.sync.zip("dist/firefox-unpacked").compress().save("dist/extension-firefox.zip");
-    console.info("Packed Firefox Extension written to dist/extension-firefox.zip");
 } else {
     await appendCssRuntime;
 }

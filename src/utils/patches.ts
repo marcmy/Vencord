@@ -45,6 +45,8 @@ export function canonicalizeMatch<T extends RegExp | string>(match: T): T {
             ? `${leadingEscapes}${String.raw`(?:[A-Za-z_$][\w$]*)`}`
             : match.slice(1)
     );
+    // The input is a RegExp supplied by trusted plugin/developer code; only Vencord's fixed placeholder is expanded.
+    // lgtm[js/regex-injection]
     const canonRegex = new RegExp(canonSource, match.flags);
     canonRegex.toString = match.toString.bind(match);
 
