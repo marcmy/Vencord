@@ -1,0 +1,10 @@
+Upstream merge conflicts
+
+Upstream: Vendicated/Vencord@94cc541e38905063988094249a40e618f83a12e4
+Fork base: 427211264ab04830e58f766acc778bf389192c74
+
+.github/workflows/publish.yml
+package.json
+packages/discord-types/package.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
