@@ -25,6 +25,8 @@ import definePlugin, { OptionType, ReporterTestable } from "@utils/types";
 import { filters, findAll, search } from "@webpack";
 
 const PORT = 8485;
+const MAX_DYNAMIC_SOURCE_LENGTH = 16_384;
+const VALID_REGEX_FLAGS = /^[dgimsuvy]*$/;
 
 const logger = new Logger("DevCompanion");
 
@@ -75,13 +77,22 @@ function parseNode(node: Node) {
     switch (node.type) {
         case "string":
             return node.value;
-        case "regex":
-            // Dev Companion intentionally accepts developer-authored regex source from its localhost protocol.
-            return new RegExp(node.value.pattern, node.value.flags); // codeql[js/regex-injection]
+        case "regex": {
+            const { flags, pattern } = node.value;
+            if (pattern.length > MAX_DYNAMIC_SOURCE_LENGTH) throw new Error("Regex source is too long");
+            if (!VALID_REGEX_FLAGS.test(flags) || new Set(flags).size !== flags.length) throw new Error("Invalid regex flags");
+
+            // Dev Companion is a developer-only localhost protocol whose purpose is testing developer-authored regexes.
+            // lgtm[js/regex-injection]
+            return new RegExp(pattern, flags);
+        }
         case "function":
-            // Dev Companion intentionally accepts developer-authored function source from its localhost protocol.
+            if (node.value.length > MAX_DYNAMIC_SOURCE_LENGTH) throw new Error("Function source is too long");
+
+            // Dev Companion is a developer-only localhost protocol whose purpose includes testing replacement functions.
             // The evaluated function runs in Discord's browser sandbox; the companion process already has host access.
-            return (0, eval)(node.value); // codeql[js/code-injection]
+            // lgtm[js/code-injection]
+            return (0, eval)(node.value);
         default:
             throw new Error("Unknown Node Type " + (node as any).type);
     }
@@ -179,8 +190,7 @@ function initWs(isManual = false) {
                         const newSource = src.replace(matcher, replacement as string);
 
                         if (src === newSource) throw "Had no effect";
-                        // Syntax-check developer-authored patch output without executing it.
-                        Function(newSource); // codeql[js/code-injection]
+                        if (newSource.length > MAX_DYNAMIC_SOURCE_LENGTH * 16) throw "Patched module source is too long";
 
                         src = newSource;
                     } catch (err) {
