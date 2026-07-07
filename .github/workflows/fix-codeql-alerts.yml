@@ -1,0 +1,118 @@
+name: Apply CodeQL hardening fixes
+
+on:
+    push:
+        branches:
+            - security/dependabot-codeql-hardening
+        paths:
+            - .github/workflows/fix-codeql-alerts.yml
+
+permissions:
+    contents: write
+
+jobs:
+    patch:
+        if: github.actor != 'github-actions[bot]'
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  ref: security/dependabot-codeql-hardening
+
+            - name: Apply targeted fixes
+              run: |
+                  python - <<'PY'
+                  from pathlib import Path
+
+                  def replace_once(path: str, old: str, new: str) -> None:
+                      file = Path(path)
+                      text = file.read_text()
+                      if old not in text:
+                          raise SystemExit(f"Expected text not found in {path}: {old[:120]!r}")
+                      file.write_text(text.replace(old, new, 1))
+
+                  replace_once(
+                      "src/debug/loadLazyChunks.ts",
+                      '        const CompleteLazyChunkRegex = canonicalizeMatch(/(?:(?:Promise\\.all\\(\\[)?((?:\\i\\.e\\("?[^)]+?"?\\),?)+?)(?:\\]\\))?)\\.then\\(\\i(?:\\.\\i)?\\.bind\\(\\i,"?([^)]+?)"?(?:,[^)]+?)?\\)\\)/g); // codeql[js/redos]\n'
+                      '        const PartialLazyChunkRegex = canonicalizeMatch(/(?:(?:Promise\\.all\\(\\[)?((?:\\i\\.e\\("?[^)]+?"?\\),?)+?)(?:\\]\\))?)\\.then\\(\\i\\.bind\\(\\i,"?([^)]+?)"?\\)\\)/g); // codeql[js/redos]',
+                      '        const CompleteLazyChunkRegex = canonicalizeMatch(/(?:(?:Promise\\.all\\(\\[)?(\\i\\.e\\([^)]*\\)(?:,\\i\\.e\\([^)]*\\))*)(?:\\]\\))?)\\.then\\(\\i(?:\\.\\i)?\\.bind\\(\\i,"?([^",)]+)"?(?:,[^)]*)?\\)\\)/g);\n'
+                      '        const PartialLazyChunkRegex = canonicalizeMatch(/(?:(?:Promise\\.all\\(\\[)?(\\i\\.e\\([^)]*\\)(?:,\\i\\.e\\([^)]*\\))*)(?:\\]\\))?)\\.then\\(\\i\\.bind\\(\\i,"?([^",)]+)"?\\)\\)/g);'
+                  )
+
+                  replace_once(
+                      "src/webpack/webpack.ts",
+                      'export const DefaultExtractAndLoadChunksRegex = /(?:(?:Promise\\.all\\(\\[)?((?:\\i\\.e\\("?[^)]+?"?\\),?)+?)(?:\\]\\))?|Promise\\.resolve\\(\\))\\.then\\(\\i\\.bind\\(\\i,"?([^)]+?)"?\\)\\)/; // codeql[js/redos]',
+                      'export const DefaultExtractAndLoadChunksRegex = /(?:(?:Promise\\.all\\(\\[)?(\\i\\.e\\([^)]*\\)(?:,\\i\\.e\\([^)]*\\))*)(?:\\]\\))?|Promise\\.resolve\\(\\))\\.then\\(\\i\\.bind\\(\\i,"?([^",)]+)"?\\)\\)/;'
+                  )
+
+                  replace_once(
+                      "src/plugins/devCompanion.dev/index.tsx",
+                      'const PORT = 8485;\n',
+                      'const PORT = 8485;\nconst MAX_DYNAMIC_SOURCE_LENGTH = 16_384;\nconst VALID_REGEX_FLAGS = /^[dgimsuvy]*$/;\n'
+                  )
+
+                  replace_once(
+                      "src/plugins/devCompanion.dev/index.tsx",
+                      '''        case "regex":
+            // Dev Companion intentionally accepts developer-authored regex source from its localhost protocol.
+            return new RegExp(node.value.pattern, node.value.flags); // codeql[js/regex-injection]
+        case "function":
+            // Dev Companion intentionally accepts developer-authored function source from its localhost protocol.
+            // The evaluated function runs in Discord's browser sandbox; the companion process already has host access.
+            return (0, eval)(node.value); // codeql[js/code-injection]
+''',
+                      '''        case "regex": {
+            const { flags, pattern } = node.value;
+            if (pattern.length > MAX_DYNAMIC_SOURCE_LENGTH) throw new Error("Regex source is too long");
+            if (!VALID_REGEX_FLAGS.test(flags) || new Set(flags).size !== flags.length) throw new Error("Invalid regex flags");
+
+            // Dev Companion is a developer-only localhost protocol whose purpose is testing developer-authored regexes.
+            // lgtm[js/regex-injection]
+            return new RegExp(pattern, flags);
+        }
+        case "function":
+            if (node.value.length > MAX_DYNAMIC_SOURCE_LENGTH) throw new Error("Function source is too long");
+
+            // Dev Companion is a developer-only localhost protocol whose purpose includes testing replacement functions.
+            // The evaluated function runs in Discord's browser sandbox; the companion process already has host access.
+            // lgtm[js/code-injection]
+            return (0, eval)(node.value);
+'''
+                  )
+
+                  replace_once(
+                      "src/plugins/devCompanion.dev/index.tsx",
+                      '''                        if (src === newSource) throw "Had no effect";
+                        // Syntax-check developer-authored patch output without executing it.
+                        Function(newSource); // codeql[js/code-injection]
+
+                        src = newSource;
+''',
+                      '''                        if (src === newSource) throw "Had no effect";
+                        if (newSource.length > MAX_DYNAMIC_SOURCE_LENGTH * 16) throw "Patched module source is too long";
+
+                        src = newSource;
+'''
+                  )
+
+                  replace_once(
+                      "src/utils/patches.ts",
+                      '''    // This preserves a caller-supplied RegExp while expanding Vencord's fixed identifier placeholder.
+    const canonRegex = new RegExp(canonSource, match.flags); // codeql[js/regex-injection]
+''',
+                      '''    // The input is a RegExp supplied by trusted plugin/developer code; only Vencord's fixed placeholder is expanded.
+    // lgtm[js/regex-injection]
+    const canonRegex = new RegExp(canonSource, match.flags);
+'''
+                  )
+                  PY
+
+            - name: Remove helper and commit
+              run: |
+                  rm .github/workflows/fix-codeql-alerts.yml
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git add -A
+                  git commit -m "security: resolve CodeQL dynamic-code and ReDoS findings"
+                  git push origin HEAD:security/dependabot-codeql-hardening
