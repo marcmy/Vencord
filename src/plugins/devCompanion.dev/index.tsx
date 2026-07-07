@@ -88,8 +88,8 @@ function parseNode(node: Node) {
         case "function":
             if (node.value.length > MAX_DYNAMIC_SOURCE_LENGTH) throw new Error("Function source is too long");
 
-            // Dev Companion is a developer-only localhost protocol whose purpose includes testing replacement functions. codeql[js/code-injection]
-            // The evaluated function runs in Discord's browser sandbox; the companion process already has host access.
+            // Dev Companion is a developer-only localhost protocol whose purpose includes testing replacement functions.
+            // The evaluated function runs in Discord's browser sandbox; the companion process already has host access. codeql[js/code-injection]
             return (0, eval)(node.value);
         default:
             throw new Error("Unknown Node Type " + (node as any).type);
