@@ -9,6 +9,14 @@ on:
             - package.json
             - packages/**/package.json
             - pnpm-workspace.yaml
+    pull_request:
+        branches:
+            - main
+        paths:
+            - .github/workflows/refresh-security-lockfile.yml
+            - package.json
+            - packages/**/package.json
+            - pnpm-workspace.yaml
 
 permissions:
     contents: write
