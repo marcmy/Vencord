@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
+ */
 
 import { showNotification } from "@api/Notifications";
 import { definePluginSettings } from "@api/Settings";
@@ -76,12 +76,12 @@ function parseNode(node: Node) {
         case "string":
             return node.value;
         case "regex":
-            return new RegExp(node.value.pattern, node.value.flags);
+            // Dev Companion intentionally accepts developer-authored regex source from its localhost protocol.
+            return new RegExp(node.value.pattern, node.value.flags); // codeql[js/regex-injection]
         case "function":
-            // We LOVE remote code execution
-            // Safety: This comes from localhost only, which actually means we have less permissions than the source,
-            // since we're running in the browser sandbox, whereas the sender has host access
-            return (0, eval)(node.value);
+            // Dev Companion intentionally accepts developer-authored function source from its localhost protocol.
+            // The evaluated function runs in Discord's browser sandbox; the companion process already has host access.
+            return (0, eval)(node.value); // codeql[js/code-injection]
         default:
             throw new Error("Unknown Node Type " + (node as any).type);
     }
@@ -179,7 +179,8 @@ function initWs(isManual = false) {
                         const newSource = src.replace(matcher, replacement as string);
 
                         if (src === newSource) throw "Had no effect";
-                        Function(newSource);
+                        // Syntax-check developer-authored patch output without executing it.
+                        Function(newSource); // codeql[js/code-injection]
 
                         src = newSource;
                     } catch (err) {
