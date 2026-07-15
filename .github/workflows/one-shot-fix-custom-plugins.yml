@@ -1,0 +1,175 @@
+name: One-shot custom plugin compatibility fix
+
+on:
+  push:
+    branches:
+      - custom-plugins
+    paths:
+      - .github/workflows/one-shot-fix-custom-plugins.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: custom-plugins
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Patch custom plugin compatibility
+        shell: python
+        run: |
+          from pathlib import Path
+
+          constants_path = Path("src/utils/constants.ts")
+          constants = constants_path.read_text(encoding="utf-8")
+          marker = '''    nightmaresan: {
+                  name: "NightmareSan",
+                  id: 304239816466235392n
+              },'''.replace("              ", "    ")
+          replacement = '''    marcmy: {
+              name: "marcmy",
+              id: 0n,
+              badge: false
+          },
+              nightmaresan: {
+                  name: "NightmareSan",
+                  id: 304239816466235392n
+              },'''.replace("              ", "    ")
+          if "    marcmy: {" not in constants:
+              if marker not in constants:
+                  raise SystemExit("Could not find constants insertion point")
+              constants = constants.replace(marker, replacement, 1)
+              constants_path.write_text(constants, encoding="utf-8")
+
+          events_path = Path("src/api/MessageEvents.ts")
+          events = events_path.read_text(encoding="utf-8")
+
+          old_message_object = '''export interface MessageObject {
+              content: string,
+              validNonShortcutEmojis: CustomEmoji[];
+              invalidEmojis: any[];
+              tts: boolean;
+          }'''.replace("          ", "")
+          new_message_object = '''export interface MessageObject {
+              content: string,
+              validNonShortcutEmojis: CustomEmoji[];
+              invalidEmojis: any[];
+              tts: boolean;
+              [key: string]: unknown;
+          }'''.replace("          ", "")
+          if "[key: string]: unknown;" not in events:
+              if old_message_object not in events:
+                  raise SystemExit("Could not find MessageObject block")
+              events = events.replace(old_message_object, new_message_object, 1)
+
+          old_options_tail = '''    mediaMention?: unknown;
+          }
+
+          export interface SendMessageProps {'''.replace("          ", "")
+          new_options_tail = '''    mediaMention?: unknown;
+
+              // Compatibility fields for custom plugins written against the previous MessageEvents API.
+              content?: string;
+              uploads?: unknown[];
+              stickers?: string[];
+              replyOptions?: {
+                  messageReference?: Message["messageReference"];
+                  allowedMentions?: {
+                      parse: string[];
+                      repliedUser: boolean;
+                  };
+              };
+          }
+
+          /** @deprecated Use SendMessageOptions. */
+          export type MessageOptions = SendMessageOptions;
+
+          export interface SendMessageProps {'''.replace("          ", "")
+          if "export type MessageOptions = SendMessageOptions;" not in events:
+              if old_options_tail not in events:
+                  raise SystemExit("Could not find SendMessageOptions insertion point")
+              events = events.replace(old_options_tail, new_options_tail, 1)
+
+          old_handler = '''export async function _handlePreSend(channelId: string, messageObj: MessageObject, options: SendMessageOptions, props: SendMessageProps) {
+              for (const listener of sendListeners) {
+                  try {
+                      const result = await listener(channelId, messageObj, options, props);
+                      if (result?.cancel) {
+                          return true;
+                      }
+                  } catch (e) {
+                      MessageEventsLogger.error("MessageSendHandler: Listener encountered an unknown error\\n", e);
+                  }
+              }
+              return false;
+          }'''.replace("          ", "")
+          new_handler = '''export async function _handlePreSend(channelId: string, messageObj: MessageObject, options: SendMessageOptions, props: SendMessageProps) {
+              // Preserve the old shape long enough for fork-only plugins to migrate cleanly.
+              if (!messageObj.content && typeof props.content === "string") {
+                  messageObj.content = props.content;
+              }
+              options.content ??= messageObj.content || props.content;
+              options.uploads ??= (props as SendMessageProps & { uploads?: unknown[]; }).uploads;
+              options.stickers ??= options.stickerIds;
+              options.replyOptions ??= {
+                  messageReference: options.messageReference,
+                  allowedMentions: options.allowedMentions
+              };
+
+              for (const listener of sendListeners) {
+                  try {
+                      const result = await listener(channelId, messageObj, options, props);
+                      if (result?.cancel) {
+                          return true;
+                      }
+                  } catch (e) {
+                      MessageEventsLogger.error("MessageSendHandler: Listener encountered an unknown error\\n", e);
+                  }
+              }
+
+              if (typeof options.content === "string") {
+                  messageObj.content = options.content;
+              }
+              if (options.stickers) {
+                  options.stickerIds = options.stickers;
+              }
+              if (options.replyOptions) {
+                  options.messageReference = options.replyOptions.messageReference;
+                  options.allowedMentions = options.replyOptions.allowedMentions;
+              }
+
+              return false;
+          }'''.replace("          ", "")
+          if "Preserve the old shape long enough" not in events:
+              if old_handler not in events:
+                  raise SystemExit("Could not find _handlePreSend block")
+              events = events.replace(old_handler, new_handler, 1)
+
+          events_path.write_text(events, encoding="utf-8")
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run full test suite
+        run: pnpm test
+
+      - name: Commit verified fix and remove one-shot workflow
+        run: |
+          rm .github/workflows/one-shot-fix-custom-plugins.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/utils/constants.ts src/api/MessageEvents.ts .github/workflows/one-shot-fix-custom-plugins.yml
+          git commit -m "Fix custom plugins after MessageEvents API update"
+          git push origin HEAD:custom-plugins
