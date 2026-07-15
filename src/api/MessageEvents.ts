@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
+ */
 
 import { Logger } from "@utils/Logger";
 import type { Channel, CustomEmoji, Message } from "@vencord/discord-types";
@@ -28,6 +28,7 @@ export interface MessageObject {
     validNonShortcutEmojis: CustomEmoji[];
     invalidEmojis: any[];
     tts: boolean;
+    [key: string]: unknown;
 }
 
 export interface SendMessageOptions {
@@ -43,7 +44,22 @@ export interface SendMessageOptions {
     // If you end up using these, update their type
     scheduledTimestamp?: unknown;
     mediaMention?: unknown;
+
+    // Temporary compatibility fields for fork-only plugins using the previous API.
+    content?: string;
+    uploads?: unknown[];
+    stickers?: string[];
+    replyOptions?: {
+        messageReference?: Message["messageReference"] | null;
+        allowedMentions?: {
+            parse: string[];
+            repliedUser: boolean;
+        };
+    };
 }
+
+/** @deprecated Use SendMessageOptions. */
+export type MessageOptions = SendMessageOptions;
 
 export interface SendMessageProps {
     hasStickers: boolean;
@@ -61,6 +77,28 @@ const sendListeners = new Set<MessageSendListener>();
 const editListeners = new Set<MessageEditListener>();
 
 export async function _handlePreSend(channelId: string, messageObj: MessageObject, options: SendMessageOptions, props: SendMessageProps) {
+    // Preserve the previous API shape long enough for fork-only plugins to migrate cleanly.
+    if (!messageObj.content && typeof props.content === "string") {
+        messageObj.content = props.content;
+    }
+
+    const compatibilityContent = options.content ?? messageObj.content || props.content;
+    const hadLegacyReplyOptions = options.replyOptions != null;
+    const compatibilityReplyOptions = options.replyOptions ?? {
+        messageReference: options.messageReference,
+        allowedMentions: options.allowedMentions
+    };
+
+    options.content = compatibilityContent;
+    options.uploads ??= (props as SendMessageProps & { uploads?: unknown[]; }).uploads;
+    options.stickers ??= options.stickerIds;
+    options.replyOptions = compatibilityReplyOptions;
+
+    if (hadLegacyReplyOptions) {
+        options.messageReference = compatibilityReplyOptions.messageReference ?? undefined;
+        options.allowedMentions = compatibilityReplyOptions.allowedMentions;
+    }
+
     for (const listener of sendListeners) {
         try {
             const result = await listener(channelId, messageObj, options, props);
@@ -71,6 +109,18 @@ export async function _handlePreSend(channelId: string, messageObj: MessageObjec
             MessageEventsLogger.error("MessageSendHandler: Listener encountered an unknown error\n", e);
         }
     }
+
+    if (typeof options.content === "string" && options.content !== compatibilityContent) {
+        messageObj.content = options.content;
+    }
+    if (options.stickers && options.stickers !== options.stickerIds) {
+        options.stickerIds = options.stickers;
+    }
+    if (hadLegacyReplyOptions || options.replyOptions !== compatibilityReplyOptions) {
+        options.messageReference = options.replyOptions?.messageReference ?? undefined;
+        options.allowedMentions = options.replyOptions?.allowedMentions;
+    }
+
     return false;
 }
 
