@@ -82,7 +82,7 @@ export async function _handlePreSend(channelId: string, messageObj: MessageObjec
         messageObj.content = props.content;
     }
 
-    const compatibilityContent = options.content ?? messageObj.content || props.content;
+    const compatibilityContent = (options.content ?? messageObj.content) || props.content;
     const hadLegacyReplyOptions = options.replyOptions != null;
     const compatibilityReplyOptions = options.replyOptions ?? {
         messageReference: options.messageReference,
