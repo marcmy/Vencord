@@ -6,7 +6,7 @@
 
 import "./style.css";
 
-import { addGlobalContextMenuPatch, findGroupChildrenByChildId, removeGlobalContextMenuPatch, NavContextMenuPatchCallback } from "@api/ContextMenu";
+import { addGlobalContextMenuPatch, findGroupChildrenByChildId, NavContextMenuPatchCallback, removeGlobalContextMenuPatch } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
 import { getUserSettingLazy } from "@api/UserSettings";
 import ErrorBoundary from "@components/ErrorBoundary";
@@ -129,7 +129,7 @@ function patchSelectedCopy(_navId: string, children: Array<ReactElement<any> | n
 }
 
 function getAuthorName(message: any) {
-    const author = message.author;
+    const { author } = message;
     if (!author) return "Unknown";
 
     const user = UserStore.getUser(author.id);

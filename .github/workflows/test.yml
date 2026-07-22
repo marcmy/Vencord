@@ -3,8 +3,13 @@ on:
     push:
     pull_request:
         branches:
+            - custom-plugins
             - main
             - dev
+
+permissions:
+    contents: read
+
 jobs:
     test:
         runs-on: ubuntu-latest
@@ -22,8 +27,17 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
-            - name: Lint & Test if desktop version compiles
-              run: pnpm test
+            - name: Test if desktop version compiles
+              run: pnpm buildStandalone
+
+            - name: Type-check
+              run: pnpm testTsc
+
+            - name: Lint TypeScript and JavaScript
+              run: pnpm lint
+
+            - name: Lint styles
+              run: pnpm lint-styles
 
             - name: Test if web version compiles
               run: pnpm buildWeb

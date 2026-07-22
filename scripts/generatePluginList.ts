@@ -16,11 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { Dirent, readdirSync, readFileSync, writeFileSync } from "fs";
+import { Dirent, existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { access, readFile } from "fs/promises";
 import { join, sep } from "path";
 import { normalize as posixNormalize, sep as posixSep } from "path/posix";
-import { BigIntLiteral, createSourceFile, Identifier, isArrayLiteralExpression, isCallExpression, isExportAssignment, isIdentifier, isObjectLiteralExpression, isPropertyAccessExpression, isPropertyAssignment, isSatisfiesExpression, isStringLiteral, isVariableStatement, NamedDeclaration, NodeArray, ObjectLiteralExpression, ScriptTarget, StringLiteral, SyntaxKind } from "typescript";
+import { BigIntLiteral, createSourceFile, isArrayLiteralExpression, isCallExpression, isExportAssignment, isIdentifier, isObjectLiteralExpression, isPropertyAccessExpression, isPropertyAssignment, isSatisfiesExpression, isSpreadAssignment, isStringLiteral, isVariableStatement, NamedDeclaration, NodeArray, ObjectLiteralExpression, ScriptTarget, StringLiteral, SyntaxKind } from "typescript";
 
 import { getPluginTarget } from "./utils.mjs";
 
@@ -60,8 +60,8 @@ function getObjectProp(node: ObjectLiteralExpression, name: string) {
     return prop;
 }
 
-function parseDevs() {
-    const file = createSourceFile("constants.ts", readFileSync("src/utils/constants.ts", "utf8"), ScriptTarget.Latest);
+function parseDevsFile(fileName: string) {
+    const file = createSourceFile(fileName, readFileSync(fileName, "utf8"), ScriptTarget.Latest);
 
     for (const child of file.getChildAt(0).getChildren()) {
         if (!isVariableStatement(child)) continue;
@@ -69,15 +69,19 @@ function parseDevs() {
         const devsDeclaration = child.declarationList.declarations.find(d => hasName(d, "Devs"));
         if (!devsDeclaration?.initializer || !isCallExpression(devsDeclaration.initializer)) continue;
 
-        const value = devsDeclaration.initializer.arguments[0];
+        const initializer = devsDeclaration.initializer.arguments[0];
+        const value = isSatisfiesExpression(initializer) ? initializer.expression : initializer;
 
-        if (!isSatisfiesExpression(value) || !isObjectLiteralExpression(value.expression)) throw new Error("Failed to parse devs: not an object literal");
+        if (!isObjectLiteralExpression(value)) throw new Error(`Failed to parse devs in ${fileName}: not an object literal`);
 
-        for (const prop of value.expression.properties) {
-            const name = (prop.name as Identifier).text;
+        for (const prop of value.properties) {
+            if (isSpreadAssignment(prop)) continue;
+
+            const name = getName(prop);
+            if (!name) throw new Error(`Failed to parse devs in ${fileName}: property has no identifier name`);
             const value = isPropertyAssignment(prop) ? prop.initializer : prop;
 
-            if (!isObjectLiteralExpression(value)) throw new Error(`Failed to parse devs: ${name} is not an object literal`);
+            if (!isObjectLiteralExpression(value)) throw new Error(`Failed to parse devs in ${fileName}: ${name} is not an object literal`);
 
             devs[name] = {
                 name: (getObjectProp(value, "name") as StringLiteral).text,
@@ -85,10 +89,19 @@ function parseDevs() {
             };
         }
 
-        return;
+        return true;
     }
 
-    throw new Error("Could not find Devs constant");
+    return false;
+}
+
+function parseDevs() {
+    if (!parseDevsFile("src/utils/constants.ts")) throw new Error("Could not find Devs constant in src/utils/constants.ts");
+
+    const customConstants = "src/utils/constants.custom.ts";
+    if (existsSync(customConstants) && !parseDevsFile(customConstants)) {
+        throw new Error(`Could not find Devs constant in ${customConstants}`);
+    }
 }
 
 async function parseFile(fileName: string) {
