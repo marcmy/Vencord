@@ -83,9 +83,6 @@ function Test-OpenAsarInstalled {
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Push-Location $repoRoot
 
-$previousNoUpdateNotifier = $env:NO_UPDATE_NOTIFIER
-$env:NO_UPDATE_NOTIFIER = "1"
-
 try {
     $currentBranch = (& git branch --show-current).Trim()
     if ($LASTEXITCODE -ne 0) {
@@ -114,7 +111,7 @@ try {
 
     Invoke-NativeStep "Publishing the exact source revision that will be built..." "git" @("push", $Remote, "HEAD:$GitBranch")
 
-    Invoke-NativeStep "Installing dependencies..." "pnpm" @("install")
+    Invoke-NativeStep "Installing dependencies..." "pnpm" @("--config.update-notifier=false", "install")
 
     Invoke-NativeStep "Building Vencord..." "pnpm" @("build")
 
@@ -132,10 +129,5 @@ try {
 
     Write-Host "Update + build + inject complete."
 } finally {
-    if ($null -eq $previousNoUpdateNotifier) {
-        Remove-Item Env:NO_UPDATE_NOTIFIER -ErrorAction SilentlyContinue
-    } else {
-        $env:NO_UPDATE_NOTIFIER = $previousNoUpdateNotifier
-    }
     Pop-Location
 }
