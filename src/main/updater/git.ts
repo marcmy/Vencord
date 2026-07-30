@@ -22,6 +22,8 @@ import { ipcMain } from "electron";
 import { join } from "path";
 import { promisify } from "util";
 
+import gitHash from "~git-hash";
+
 import { serializeErrors } from "./common";
 
 const VENCORD_SRC_DIR = join(__dirname, "..");
@@ -85,6 +87,15 @@ async function getRepo() {
         .replace(/\.git$/, "");
 }
 
+async function commitExists(ref: string) {
+    try {
+        await git("cat-file", "-e", `${ref}^{commit}`);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 async function calculateGitChanges() {
     const { remote, remoteBranch, ref } = await getUpdateTarget();
 
@@ -93,7 +104,8 @@ async function calculateGitChanges() {
     const existsOnRemote = (await git("ls-remote", remote, remoteBranch)).stdout.length > 0;
     if (!existsOnRemote) return [];
 
-    const res = await git("log", `HEAD..${ref}`, "--pretty=format:%an/%h/%s");
+    const buildRef = await commitExists(gitHash) ? gitHash : "HEAD";
+    const res = await git("log", `${buildRef}..${ref}`, "--pretty=format:%an/%h/%s");
 
     const commits = res.stdout.trim();
     return commits ? commits.split("\n").map(line => {
@@ -107,10 +119,10 @@ async function calculateGitChanges() {
 
 async function pull() {
     const { remote, remoteBranch } = await getUpdateTarget();
-    const res = await git("pull", "--rebase", remote, remoteBranch);
-    const output = res.stdout + res.stderr;
+    await git("pull", "--rebase", remote, remoteBranch);
 
-    return !/Already up to date|Current branch .* is up to date/.test(output);
+    const headHash = (await git("rev-parse", "--short", "HEAD")).stdout.trim();
+    return headHash !== gitHash;
 }
 
 async function build() {

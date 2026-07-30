@@ -95,7 +95,7 @@ function Updater() {
                 disabled={!settings.autoUpdate}
             />
 
-            <Forms.FormTitle tag="h5" className={Margins.top20}>Repo</Forms.FormTitle>
+            <Forms.FormTitle tag="h5" className={Margins.top20}>Vencord Build</Forms.FormTitle>
 
             <Forms.FormText>
                 {repoPending
@@ -108,8 +108,8 @@ function Updater() {
                             </Link>
                         )
                 }
-                {" "}
-                (<HashLink hash={gitHash} repo={repo} disabled={repoPending} />)
+                {" @ "}
+                <HashLink hash={gitHash} repo={repo} disabled={repoPending} />
             </Forms.FormText>
 
             <Divider className={classes(Margins.top16, Margins.bottom16)} />

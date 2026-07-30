@@ -1,7 +1,10 @@
 param(
-    [string]$Remote = "upstream",
-    [string]$GitBranch = "main",
+    [string]$Remote = "origin",
+    [string]$GitBranch = "custom-plugins",
+    [string]$UpstreamRemote = "upstream",
+    [string]$UpstreamBranch = "main",
     [string]$DiscordBranch = "stable",
+    [switch]$SkipUpstreamSync,
     [switch]$SkipOpenAsar
 )
 
@@ -80,8 +83,36 @@ function Test-OpenAsarInstalled {
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Push-Location $repoRoot
 
+$previousNoUpdateNotifier = $env:NO_UPDATE_NOTIFIER
+$env:NO_UPDATE_NOTIFIER = "1"
+
 try {
-    Invoke-NativeStep "Updating from $Remote/$GitBranch..." "git" @("pull", "--rebase", $Remote, $GitBranch)
+    $currentBranch = (& git branch --show-current).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not determine the current Git branch."
+    }
+    if ($currentBranch -ne $GitBranch) {
+        throw "Expected branch '$GitBranch', but '$currentBranch' is checked out."
+    }
+
+    $pendingChanges = & git status --porcelain
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not check the Git working tree."
+    }
+    if ($pendingChanges) {
+        throw "Commit or stash your changes before running update.cmd."
+    }
+
+    Invoke-NativeStep "Fetching your fork branch..." "git" @("fetch", $Remote, $GitBranch)
+    Invoke-NativeStep "Tracking $Remote/$GitBranch..." "git" @("branch", "--set-upstream-to=$Remote/$GitBranch", $GitBranch)
+    Invoke-NativeStep "Updating from your fork without rewriting history..." "git" @("pull", "--ff-only", $Remote, $GitBranch)
+
+    if (-not $SkipUpstreamSync) {
+        Invoke-NativeStep "Fetching Vencord upstream..." "git" @("fetch", $UpstreamRemote, $UpstreamBranch)
+        Invoke-NativeStep "Merging $UpstreamRemote/$UpstreamBranch..." "git" @("merge", "--no-edit", "$UpstreamRemote/$UpstreamBranch")
+    }
+
+    Invoke-NativeStep "Publishing the exact source revision that will be built..." "git" @("push", $Remote, "HEAD:$GitBranch")
 
     Invoke-NativeStep "Installing dependencies..." "pnpm" @("install")
 
@@ -101,5 +132,10 @@ try {
 
     Write-Host "Update + build + inject complete."
 } finally {
+    if ($null -eq $previousNoUpdateNotifier) {
+        Remove-Item Env:NO_UPDATE_NOTIFIER -ErrorAction SilentlyContinue
+    } else {
+        $env:NO_UPDATE_NOTIFIER = $previousNoUpdateNotifier
+    }
     Pop-Location
 }
