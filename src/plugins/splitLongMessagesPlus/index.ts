@@ -170,6 +170,13 @@ function getLeadingGuardInfo(text: string) {
     };
 }
 
+function getSafeSliceLimit(text: string, limit: number) {
+    const slice = text.slice(0, limit);
+    const tokenStart = slice.lastIndexOf("<");
+    if (tokenStart <= slice.lastIndexOf(">")) return limit;
+
+    return /^<a?:[^:\s]+:\d+>/.test(text.slice(tokenStart)) ? tokenStart : limit;
+}
 function splitContent(content: string, maxLen = MAX_MESSAGE_LENGTH) {
     const chunks: string[] = [];
     let remaining = content;
@@ -185,13 +192,14 @@ function splitContent(content: string, maxLen = MAX_MESSAGE_LENGTH) {
             break;
         }
 
-        const slice = remaining.slice(0, limit);
+        const sliceLimit = getSafeSliceLimit(remaining, limit);
+        const slice = remaining.slice(0, sliceLimit);
         const { index, separatorKind } = findSplitIndex(slice);
         let splitAt = index;
         let takeLength = splitAt;
         let dropLength = splitAt;
         if (splitAt <= 0) {
-            splitAt = limit;
+            splitAt = sliceLimit;
             takeLength = splitAt;
             dropLength = splitAt;
         } else if (separatorKind === "space") {
@@ -936,9 +944,9 @@ export default definePlugin({
         options: MessageOptions | undefined,
         props: SendMessageProps | undefined
     ) {
-        if (!msg.content && !(props as any)?.uploads?.length) return false;
+        if (!msg.content && !options?.uploads?.length) return false;
         if ((msg as any)[HANDLED_FLAG]) return false;
-        if (hasAutoTextUpload(props as any) || hasLiveAutoTextUpload(channelId)) return false;
+        if (hasAutoTextUpload(options) || hasLiveAutoTextUpload(channelId)) return false;
 
         const content = getLongMessageContentSync(channelId, msg);
         if (content.length <= MAX_MESSAGE_LENGTH) return false;
