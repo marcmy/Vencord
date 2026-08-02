@@ -1,0 +1,95 @@
+name: Refine SplitLongMessagesPlus FakeNitro fix
+
+on:
+    push:
+        branches:
+            - fix/split-long-messages-fakenitro-final
+
+permissions:
+    contents: write
+
+jobs:
+    refine:
+        if: ${{ !contains(github.event.head_commit.message, '[skip split refine]') }}
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  ref: fix/split-long-messages-fakenitro-final
+                  fetch-depth: 0
+
+            - name: Refine source
+              shell: bash
+              run: |
+                  python3 - <<'PY'
+                  from pathlib import Path
+
+                  path = Path("src/plugins/splitLongMessagesPlus/index.ts")
+                  text = path.read_text(encoding="utf-8")
+
+                  marker = "function splitContent(content: string, maxLen = MAX_MESSAGE_LENGTH) {"
+                  helper = "\n".join([
+                      "function getSafeSliceLimit(text: string, limit: number) {",
+                      "    const slice = text.slice(0, limit);",
+                      "    const tokenStart = slice.lastIndexOf(\"<\");",
+                      "    if (tokenStart <= slice.lastIndexOf(\">\")) return limit;",
+                      "",
+                      "    return /^<a?:[^:\\s]+:\\d+>/.test(text.slice(tokenStart)) ? tokenStart : limit;",
+                      "}",
+                      "",
+                  ])
+                  if helper.strip() not in text:
+                      text = text.replace(marker, helper + marker, 1)
+
+                  text = text.replace(
+                      "        const slice = remaining.slice(0, limit);\n",
+                      "        const sliceLimit = getSafeSliceLimit(remaining, limit);\n        const slice = remaining.slice(0, sliceLimit);\n",
+                      1
+                  )
+                  text = text.replace(
+                      "            splitAt = limit;\n",
+                      "            splitAt = sliceLimit;\n",
+                      1
+                  )
+                  text = text.replace(
+                      "        if (!msg.content && !(props as any)?.uploads?.length) return false;\n",
+                      "        if (!msg.content && !options?.uploads?.length) return false;\n",
+                      1
+                  )
+                  text = text.replace(
+                      "        if (hasAutoTextUpload(props as any) || hasLiveAutoTextUpload(channelId)) return false;\n",
+                      "        if (hasAutoTextUpload(options) || hasLiveAutoTextUpload(channelId)) return false;\n",
+                      1
+                  )
+
+                  path.write_text(text, encoding="utf-8")
+                  PY
+
+                  git diff --check
+
+            - uses: pnpm/action-setup@v6
+
+            - name: Use Node.js 24
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Type-check
+              run: pnpm testTsc
+
+            - name: Lint changed plugin
+              run: pnpm exec eslint src/plugins/splitLongMessagesPlus/index.ts
+
+            - name: Commit refinement
+              shell: bash
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git add src/plugins/splitLongMessagesPlus/index.ts
+                  git commit -m "Refine FakeNitro split handling [skip split refine]"
+                  git push origin HEAD:fix/split-long-messages-fakenitro-final
