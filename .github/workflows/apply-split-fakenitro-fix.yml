@@ -19,7 +19,7 @@ jobs:
                   ref: fix/split-long-messages-fakenitro
                   fetch-depth: 0
 
-            - name: Fix generated indentation
+            - name: Finish focused source cleanup
               shell: bash
               run: |
                   python3 - <<'PY'
@@ -27,7 +27,22 @@ jobs:
 
                   path = Path("src/plugins/splitLongMessagesPlus/index.ts")
                   text = path.read_text(encoding="utf-8")
-                  old = '''        if (MessageActions?.sendMessage) {
+
+                  malformed = '''        if (MessageActions?.sendMessage) {
+                  this.originalSendMessage = MessageActions.sendMessage.bind(MessageActions);
+                  MessageActions.sendMessage = (channelId, msg, waitForChannelReady, options) => {
+                      if (msg?.content?.length > MAX_MESSAGE_LENGTH) {
+                          const chunks = splitContent(msg.content, MAX_MESSAGE_LENGTH);
+                          if (chunks.length > 1) {
+                              return sendChunksSequentially(channelId, chunks, msg, options);
+                          }
+                      }
+
+                      return this.originalSendMessage!(channelId, msg, waitForChannelReady, options);
+                  };
+              }'''
+
+                  corrected = '''        if (MessageActions?.sendMessage) {
                       this.originalSendMessage = MessageActions.sendMessage.bind(MessageActions);
                       MessageActions.sendMessage = (channelId, msg, waitForChannelReady, options) => {
                           if (msg?.content?.length > MAX_MESSAGE_LENGTH) {
@@ -40,20 +55,26 @@ jobs:
                           return this.originalSendMessage!(channelId, msg, waitForChannelReady, options);
                       };
                   }'''
-                  # The first patch was functionally correct but lost one indentation level.
-                  malformed = old.replace("        this.original", "    this.original") \
-                      .replace("        MessageActions.sendMessage", "    MessageActions.sendMessage") \
-                      .replace("            if (msg", "        if (msg") \
-                      .replace("                const chunks", "            const chunks") \
-                      .replace("                if (chunks", "            if (chunks") \
-                      .replace("                    return sendChunks", "                return sendChunks") \
-                      .replace("                }\n            }", "            }\n        }") \
-                      .replace("            return this.original", "        return this.original") \
-                      .replace("        };\n    }", "    };\n}")
 
                   if malformed not in text:
-                      raise RuntimeError("Malformed wrapper block was not found")
-                  path.write_text(text.replace(malformed, old, 1), encoding="utf-8")
+                      raise RuntimeError("Expected malformed MessageActions wrapper was not found")
+                  text = text.replace(malformed, corrected, 1)
+
+                  unused_helper = '''function stripAutoTextUploads(options: MessageOptions | undefined) {
+                      if (!options?.uploads?.length) return;
+
+                      const filtered = options.uploads.filter(upload => !isAutoTextUpload(upload));
+                      if (filtered.length !== options.uploads.length) {
+                          options.uploads = filtered;
+                      }
+                  }
+
+                  '''
+                  if unused_helper not in text:
+                      raise RuntimeError("Expected unused stripAutoTextUploads helper was not found")
+                  text = text.replace(unused_helper, "", 1)
+
+                  path.write_text(text, encoding="utf-8")
                   PY
 
                   git diff --check
@@ -81,5 +102,5 @@ jobs:
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
                   git add src/plugins/splitLongMessagesPlus/index.ts
-                  git commit -m "Polish SplitLongMessagesPlus fix [skip split patch]"
+                  git commit -m "Validate SplitLongMessagesPlus FakeNitro fix [skip split patch]"
                   git push origin HEAD:fix/split-long-messages-fakenitro
