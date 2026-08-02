@@ -559,18 +559,18 @@ export default definePlugin({
         }
 
         if (MessageActions?.sendMessage) {
-    this.originalSendMessage = MessageActions.sendMessage.bind(MessageActions);
-    MessageActions.sendMessage = (channelId, msg, waitForChannelReady, options) => {
-        if (msg?.content?.length > MAX_MESSAGE_LENGTH) {
-            const chunks = splitContent(msg.content, MAX_MESSAGE_LENGTH);
-            if (chunks.length > 1) {
-                return sendChunksSequentially(channelId, chunks, msg, options);
-            }
-        }
+            this.originalSendMessage = MessageActions.sendMessage.bind(MessageActions);
+            MessageActions.sendMessage = (channelId, msg, waitForChannelReady, options) => {
+                if (msg?.content?.length > MAX_MESSAGE_LENGTH) {
+                    const chunks = splitContent(msg.content, MAX_MESSAGE_LENGTH);
+                    if (chunks.length > 1) {
+                        return sendChunksSequentially(channelId, chunks, msg, options);
+                    }
+                }
 
-        return this.originalSendMessage!(channelId, msg, waitForChannelReady, options);
-    };
-}
+                return this.originalSendMessage!(channelId, msg, waitForChannelReady, options);
+            };
+        }
 
         const uploadTargets = new Set<Record<string, any>>();
         const uploadHandlerModule = safeGet(() => UploadHandler as any);
