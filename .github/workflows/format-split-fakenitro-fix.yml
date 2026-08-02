@@ -1,0 +1,76 @@
+name: Format SplitLongMessagesPlus FakeNitro fix
+
+on:
+    push:
+        branches:
+            - fix/split-long-messages-fakenitro-final
+
+permissions:
+    contents: write
+
+jobs:
+    format:
+        if: ${{ !contains(github.event.head_commit.message, '[skip split format]') }}
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  ref: fix/split-long-messages-fakenitro-final
+                  fetch-depth: 0
+
+            - name: Format wrapper block
+              shell: bash
+              run: |
+                  python3 - <<'PY'
+                  from pathlib import Path
+
+                  path = Path("src/plugins/splitLongMessagesPlus/index.ts")
+                  text = path.read_text(encoding="utf-8")
+                  start = text.index("        if (MessageActions?.sendMessage) {")
+                  end = text.index("\n\n        const uploadTargets", start)
+                  replacement = "\n".join([
+                      "        if (MessageActions?.sendMessage) {",
+                      "            this.originalSendMessage = MessageActions.sendMessage.bind(MessageActions);",
+                      "            MessageActions.sendMessage = (channelId, msg, waitForChannelReady, options) => {",
+                      "                if (msg?.content?.length > MAX_MESSAGE_LENGTH) {",
+                      "                    const chunks = splitContent(msg.content, MAX_MESSAGE_LENGTH);",
+                      "                    if (chunks.length > 1) {",
+                      "                        return sendChunksSequentially(channelId, chunks, msg, options);",
+                      "                    }",
+                      "                }",
+                      "",
+                      "                return this.originalSendMessage!(channelId, msg, waitForChannelReady, options);",
+                      "            };",
+                      "        }",
+                  ])
+                  path.write_text(text[:start] + replacement + text[end:], encoding="utf-8")
+                  PY
+
+                  git diff --check
+
+            - uses: pnpm/action-setup@v6
+
+            - name: Use Node.js 24
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Type-check
+              run: pnpm testTsc
+
+            - name: Lint changed plugin
+              run: pnpm exec eslint src/plugins/splitLongMessagesPlus/index.ts
+
+            - name: Commit formatting
+              shell: bash
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git add src/plugins/splitLongMessagesPlus/index.ts
+                  git commit -m "Format SplitLongMessagesPlus fix [skip split format]"
+                  git push origin HEAD:fix/split-long-messages-fakenitro-final
