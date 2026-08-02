@@ -1,4 +1,4 @@
-name: Apply SplitLongMessagesPlus FakeNitro fix
+name: Validate SplitLongMessagesPlus FakeNitro fix
 
 on:
     push:
@@ -9,7 +9,7 @@ permissions:
     contents: write
 
 jobs:
-    apply-fix:
+    validate-fix:
         if: ${{ !contains(github.event.head_commit.message, '[skip split patch]') }}
         runs-on: ubuntu-latest
 
@@ -19,7 +19,7 @@ jobs:
                   ref: fix/split-long-messages-fakenitro
                   fetch-depth: 0
 
-            - name: Apply focused source patch
+            - name: Fix generated indentation
               shell: bash
               run: |
                   python3 - <<'PY'
@@ -27,258 +27,59 @@ jobs:
 
                   path = Path("src/plugins/splitLongMessagesPlus/index.ts")
                   text = path.read_text(encoding="utf-8")
-
-                  def replace_once(old: str, new: str) -> None:
-                      global text
-                      count = text.count(old)
-                      if count != 1:
-                          raise RuntimeError(f"Expected one match, found {count}: {old[:80]!r}")
-                      text = text.replace(old, new, 1)
-
-                  def replace_between(start: str, end: str, replacement: str) -> None:
-                      global text
-                      start_index = text.index(start)
-                      end_index = text.index(end, start_index)
-                      text = text[:start_index] + replacement + text[end_index:]
-
-                  replace_once(
-                      'import { MessageObject, MessageOptions } from "@api/MessageEvents";',
-                      'import { _handlePreSend, MessageObject, MessageOptions, SendMessageProps } from "@api/MessageEvents";'
-                  )
-                  replace_once(
-                      'import { DraftStore, DraftType, FluxDispatcher, Forms, MessageActions, Modal, openModal, React, SelectedChannelStore, UploadAttachmentStore, UploadHandler, UploadManager, useState } from "@webpack/common";',
-                      'import { ChannelStore, DraftStore, DraftType, EmojiStore, FluxDispatcher, Forms, MessageActions, Modal, openModal, React, SelectedChannelStore, UploadAttachmentStore, UploadHandler, UploadManager, useState } from "@webpack/common";'
-                  )
-
-                  replace_between(
-                      "function buildFollowUpOptions(",
-                      "\n\nfunction getLongMessageContentSync",
-                      r'''function buildChunkOptions(options: MessageOptions | undefined, content: string, firstChunk: boolean) {
-                      const chunkOptions = {
-                          ...(options ?? {}),
-                          content
-                      } as MessageOptions;
-
-                      if (!firstChunk) {
-                          chunkOptions.uploads = undefined;
-                          chunkOptions.stickers = undefined;
-                          chunkOptions.stickerIds = undefined;
-                          chunkOptions.messageReference = undefined;
-                          chunkOptions.replyOptions = options?.replyOptions
-                              ? { messageReference: null, allowedMentions: options.replyOptions.allowedMentions }
-                              : undefined;
-                      }
-
-                      return chunkOptions;
-                  }
-
-                  function getChunkEmojis(content: string, knownEmojis: MessageObject["validNonShortcutEmojis"] = []) {
-                      const knownById = new Map(knownEmojis.map(emoji => [String(emoji.id), emoji]));
-                      const emojis = [] as MessageObject["validNonShortcutEmojis"];
-
-                      for (const match of content.matchAll(/(?<!\\)<a?:[^:\s]+:(\d+)>/g)) {
-                          const emoji = knownById.get(match[1]) ?? safeGet(() => EmojiStore.getCustomEmojiById(match[1]));
-                          if (emoji) emojis.push(emoji as any);
-                      }
-
-                      return emojis;
-                  }
-
-                  function buildChunkMessage(baseMessage: MessageObject | undefined, content: string) {
-                      return {
-                          ...(baseMessage ?? {}),
-                          content,
-                          tts: baseMessage?.tts ?? false,
-                          invalidEmojis: [],
-                          validNonShortcutEmojis: getChunkEmojis(content, baseMessage?.validNonShortcutEmojis),
-                          [HANDLED_FLAG]: true
-                      } satisfies MessageObject;
-                  }'''
-                  )
-
-                  replace_between(
-                      "function sendFollowUps(",
-                      "\n\nfunction clearComposerState",
-                      r'''function buildChunkProps(channelId: string, content: string, props: SendMessageProps | undefined, firstChunk: boolean) {
-                      const channel = props?.channel ?? safeGet(() => ChannelStore.getChannel(channelId));
-                      if (!channel) return;
-
-                      return {
-                          ...(props ?? {}),
-                          channel,
-                          content,
-                          hasAttachments: firstChunk ? props?.hasAttachments ?? false : false,
-                          hasStickers: firstChunk ? props?.hasStickers ?? false : false,
-                          openWarningPopout: props?.openWarningPopout ?? (() => ({ shouldClear: false, shouldRefocus: true })),
-                          uploads: firstChunk ? (props as any)?.uploads : undefined
-                      } as SendMessageProps;
-                  }
-
-                  async function sendPreparedChunk(
-                      channelId: string,
-                      msg: MessageObject,
-                      options: MessageOptions,
-                      props: SendMessageProps | undefined
-                  ) {
-                      if (props && await _handlePreSend(channelId, msg, options, props)) return;
-
-                      // FakeNitro expands custom emoji tokens into markdown image links. Split
-                      // again after all pre-send transforms so every payload remains <= 2000.
-                      const finalChunks = splitContent(msg.content, MAX_MESSAGE_LENGTH).filter(Boolean);
-                      for (let index = 0; index < finalChunks.length; index++) {
-                          const content = finalChunks[index];
-                          const finalMessage: MessageObject = {
-                              ...msg,
-                              content,
-                              invalidEmojis: [],
-                              validNonShortcutEmojis: []
-                          };
-                          const finalOptions = buildChunkOptions(options, content, index === 0);
-                          await Promise.resolve(MessageActions._sendMessage(channelId, finalMessage, finalOptions));
-                      }
-                  }'''
-                  )
-
-                  replace_between(
-                      "async function sendChunksSequentially(",
-                      "\n\nfunction isChatInputTarget",
-                      r'''async function sendChunksSequentially(
-                      channelId: string,
-                      chunks: string[],
-                      baseMessage?: MessageObject,
-                      options?: MessageOptions,
-                      props?: SendMessageProps
-                  ) {
-                      for (let index = 0; index < chunks.length; index++) {
-                          const content = chunks[index];
-                          if (!content) continue;
-
-                          const firstChunk = index === 0;
-                          const msg = buildChunkMessage(baseMessage, content);
-                          const chunkOptions = buildChunkOptions(options, content, firstChunk);
-                          const chunkProps = buildChunkProps(channelId, content, props, firstChunk);
-
-                          try {
-                              await sendPreparedChunk(channelId, msg, chunkOptions, chunkProps);
-                          } catch {
-                              // Keep best-effort behavior; continue attempting later chunks.
-                          }
-                      }
-                  }'''
-                  )
-
-                  replace_once(
-                      '    settings,\n\n    patches:',
-                      '    settings,\n    dependencies: ["MessageEventsAPI"],\n\n    patches:'
-                  )
-
-                  replace_once(
-                      '''                replace: (m, parsedMessage, channel, replyOptions, extra) =>
-                                      `${m}$self.handleEarlySplit(${channel}.id,${parsedMessage},${extra},${replyOptions});`''',
-                      '''                replace: (m, parsedMessage, channel, options, props) =>
-                                      `${m}if($self.handleEarlySplit(${channel}.id,${parsedMessage},${options},${props}))return{shouldClear:true,shouldRefocus:true};`'''
-                  )
-
-                  replace_between(
-                      "        if (MessageActions?.sendMessage) {",
-                      "\n\n        const uploadTargets",
-                      r'''        if (MessageActions?.sendMessage) {
-                          this.originalSendMessage = MessageActions.sendMessage.bind(MessageActions);
-                          MessageActions.sendMessage = (channelId, msg, waitForChannelReady, options) => {
-                              if (msg?.content?.length > MAX_MESSAGE_LENGTH) {
-                                  const chunks = splitContent(msg.content, MAX_MESSAGE_LENGTH);
-                                  if (chunks.length > 1) {
-                                      return sendChunksSequentially(channelId, chunks, msg, options);
-                                  }
+                  old = '''        if (MessageActions?.sendMessage) {
+                      this.originalSendMessage = MessageActions.sendMessage.bind(MessageActions);
+                      MessageActions.sendMessage = (channelId, msg, waitForChannelReady, options) => {
+                          if (msg?.content?.length > MAX_MESSAGE_LENGTH) {
+                              const chunks = splitContent(msg.content, MAX_MESSAGE_LENGTH);
+                              if (chunks.length > 1) {
+                                  return sendChunksSequentially(channelId, chunks, msg, options);
                               }
-
-                              return this.originalSendMessage!(channelId, msg, waitForChannelReady, options);
-                          };
-                      }'''
-                  )
-
-                  replace_between(
-                      "    handleEarlySplit(",
-                      "\n\n    handleTooLongWarning",
-                      r'''    handleEarlySplit(
-                          channelId: string,
-                          msg: MessageObject,
-                          options: MessageOptions | undefined,
-                          props: SendMessageProps | undefined
-                      ) {
-                          if (!msg.content && !(props as any)?.uploads?.length) return false;
-                          if ((msg as any)[HANDLED_FLAG]) return false;
-                          if (hasAutoTextUpload(props as any) || hasLiveAutoTextUpload(channelId)) return false;
-
-                          const content = getLongMessageContentSync(channelId, msg);
-                          if (content.length <= MAX_MESSAGE_LENGTH) return false;
-
-                          const chunks = splitContent(content, MAX_MESSAGE_LENGTH);
-                          if (chunks.length <= 1) return false;
-
-                          setTimeout(() => {
-                              void sendChunksSequentially(channelId, chunks, msg, options, props);
-                          }, 0);
-                          return true;
-                      },'''
-                  )
-
-                  replace_between(
-                      "    sendSplitFromDraft(",
-                      "\n\n    async onBeforeMessageSend",
-                      r'''    sendSplitFromDraft(channelId: string, content: string) {
-                          if (this.sendingSplit) return;
-                          this.sendingSplit = true;
-
-                          const chunks = splitContent(content, MAX_MESSAGE_LENGTH);
-                          if (chunks.length === 0) {
-                              this.sendingSplit = false;
-                              return;
                           }
 
-                          clearComposerState(channelId);
-                          void sendChunksSequentially(channelId, chunks).finally(() => {
-                              this.sendingSplit = false;
-                          });
-                      },'''
-                  )
+                          return this.originalSendMessage!(channelId, msg, waitForChannelReady, options);
+                      };
+                  }'''
+                  # The first patch was functionally correct but lost one indentation level.
+                  malformed = old.replace("        this.original", "    this.original") \
+                      .replace("        MessageActions.sendMessage", "    MessageActions.sendMessage") \
+                      .replace("            if (msg", "        if (msg") \
+                      .replace("                const chunks", "            const chunks") \
+                      .replace("                if (chunks", "            if (chunks") \
+                      .replace("                    return sendChunks", "                return sendChunks") \
+                      .replace("                }\n            }", "            }\n        }") \
+                      .replace("            return this.original", "        return this.original") \
+                      .replace("        };\n    }", "    };\n}")
 
-                  replace_between(
-                      "    async onBeforeMessageSend(",
-                      "\n});",
-                      r'''    async onBeforeMessageSend(channelId, msg, options, props) {
-                          if (!msg.content && !options?.uploads?.length) return;
-                          if ((msg as any)[HANDLED_FLAG]) return;
-
-                          const fromAutoTextUpload = hasAutoTextUpload(options) || hasLiveAutoTextUpload(channelId);
-                          const content = await getLongMessageContent(channelId, msg, options);
-                          if (content.length <= MAX_MESSAGE_LENGTH) return;
-
-                          if (fromAutoTextUpload) {
-                              this.openLongMessageEditor(channelId, content);
-                              return { cancel: true };
-                          }
-
-                          const chunks = splitContent(content, MAX_MESSAGE_LENGTH);
-                          if (chunks.length <= 1) return;
-
-                          setTimeout(() => {
-                              void sendChunksSequentially(channelId, chunks, msg, options, props);
-                          }, 0);
-                          return { cancel: true };
-                      }'''
-                  )
-
-                  path.write_text(text, encoding="utf-8")
+                  if malformed not in text:
+                      raise RuntimeError("Malformed wrapper block was not found")
+                  path.write_text(text.replace(malformed, old, 1), encoding="utf-8")
                   PY
 
                   git diff --check
 
-            - name: Commit source fix
+            - uses: pnpm/action-setup@v6
+
+            - name: Use Node.js 24
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Type-check
+              run: pnpm testTsc
+
+            - name: Lint changed plugin
+              run: pnpm exec eslint src/plugins/splitLongMessagesPlus/index.ts
+
+            - name: Commit validated source fix
               shell: bash
               run: |
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
                   git add src/plugins/splitLongMessagesPlus/index.ts
-                  git commit -m "Fix FakeNitro emojis in split messages [skip split patch]"
+                  git commit -m "Polish SplitLongMessagesPlus fix [skip split patch]"
                   git push origin HEAD:fix/split-long-messages-fakenitro
