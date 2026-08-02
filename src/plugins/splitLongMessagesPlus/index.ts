@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { MessageObject, MessageOptions } from "@api/MessageEvents";
+import { _handlePreSend, MessageObject, MessageOptions, SendMessageProps } from "@api/MessageEvents";
 import { definePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 import { filters, findAll, findByPropsLazy, moduleListeners } from "@webpack";
-import { DraftStore, DraftType, FluxDispatcher, Forms, MessageActions, Modal, openModal, React, SelectedChannelStore, UploadAttachmentStore, UploadHandler, UploadManager, useState } from "@webpack/common";
+import { ChannelStore, DraftStore, DraftType, EmojiStore, FluxDispatcher, Forms, MessageActions, Modal, openModal, React, SelectedChannelStore, UploadAttachmentStore, UploadHandler, UploadManager, useState } from "@webpack/common";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const LEADING_GUARD = "\u200b";
@@ -226,17 +226,46 @@ function splitContent(content: string, maxLen = MAX_MESSAGE_LENGTH) {
     return chunks;
 }
 
-function buildFollowUpOptions(options: MessageOptions | undefined) {
-    if (!options) return options;
+function buildChunkOptions(options: MessageOptions | undefined, content: string, firstChunk: boolean) {
+    const chunkOptions = {
+        ...(options ?? {}),
+        content
+    } as MessageOptions;
 
-    return {
-        ...options,
-        uploads: undefined,
-        stickers: undefined,
-        replyOptions: options.replyOptions
+    if (!firstChunk) {
+        chunkOptions.uploads = undefined;
+        chunkOptions.stickers = undefined;
+        chunkOptions.stickerIds = undefined;
+        chunkOptions.messageReference = undefined;
+        chunkOptions.replyOptions = options?.replyOptions
             ? { messageReference: null, allowedMentions: options.replyOptions.allowedMentions }
-            : options.replyOptions
-    } satisfies MessageOptions;
+            : undefined;
+    }
+
+    return chunkOptions;
+}
+
+function getChunkEmojis(content: string, knownEmojis: MessageObject["validNonShortcutEmojis"] = []) {
+    const knownById = new Map(knownEmojis.map(emoji => [String(emoji.id), emoji]));
+    const emojis = [] as MessageObject["validNonShortcutEmojis"];
+
+    for (const match of content.matchAll(/(?<!\\)<a?:[^:\s]+:(\d+)>/g)) {
+        const emoji = knownById.get(match[1]) ?? safeGet(() => EmojiStore.getCustomEmojiById(match[1]));
+        if (emoji) emojis.push(emoji as any);
+    }
+
+    return emojis;
+}
+
+function buildChunkMessage(baseMessage: MessageObject | undefined, content: string) {
+    return {
+        ...(baseMessage ?? {}),
+        content,
+        tts: baseMessage?.tts ?? false,
+        invalidEmojis: [],
+        validNonShortcutEmojis: getChunkEmojis(content, baseMessage?.validNonShortcutEmojis),
+        [HANDLED_FLAG]: true
+    } satisfies MessageObject;
 }
 
 function getLongMessageContentSync(channelId: string, msg: MessageObject) {
@@ -313,15 +342,42 @@ async function readAutoTextUpload(upload: any) {
     }
 }
 
-function sendFollowUps(channelId: string, baseMessage: MessageObject, options: MessageOptions | undefined, chunks: string[]) {
-    if (chunks.length === 0) return;
-    const followUpOptions = buildFollowUpOptions(options) ?? {} as any;
+function buildChunkProps(channelId: string, content: string, props: SendMessageProps | undefined, firstChunk: boolean) {
+    const channel = props?.channel ?? safeGet(() => ChannelStore.getChannel(channelId));
+    if (!channel) return;
 
-    for (const chunk of chunks) {
-        MessageActions._sendMessage(channelId, {
-            ...baseMessage,
-            content: chunk
-        }, followUpOptions);
+    return {
+        ...(props ?? {}),
+        channel,
+        content,
+        hasAttachments: firstChunk ? props?.hasAttachments ?? false : false,
+        hasStickers: firstChunk ? props?.hasStickers ?? false : false,
+        openWarningPopout: props?.openWarningPopout ?? (() => ({ shouldClear: false, shouldRefocus: true })),
+        uploads: firstChunk ? (props as any)?.uploads : undefined
+    } as SendMessageProps;
+}
+
+async function sendPreparedChunk(
+    channelId: string,
+    msg: MessageObject,
+    options: MessageOptions,
+    props: SendMessageProps | undefined
+) {
+    if (props && await _handlePreSend(channelId, msg, options, props)) return;
+
+    // FakeNitro expands custom emoji tokens into markdown image links. Split
+    // again after all pre-send transforms so every payload remains <= 2000.
+    const finalChunks = splitContent(msg.content, MAX_MESSAGE_LENGTH).filter(Boolean);
+    for (let index = 0; index < finalChunks.length; index++) {
+        const content = finalChunks[index];
+        const finalMessage: MessageObject = {
+            ...msg,
+            content,
+            invalidEmojis: [],
+            validNonShortcutEmojis: []
+        };
+        const finalOptions = buildChunkOptions(options, content, index === 0);
+        await Promise.resolve(MessageActions._sendMessage(channelId, finalMessage, finalOptions));
     }
 }
 
@@ -331,21 +387,24 @@ function clearComposerState(channelId: string) {
     FluxDispatcher.dispatch({ type: "DELETE_PENDING_REPLY", channelId });
 }
 
-async function sendChunksSequentially(channelId: string, chunks: string[]) {
-    for (const content of chunks) {
-        const msg: MessageObject = {
-            content,
-            tts: false,
-            invalidEmojis: [],
-            validNonShortcutEmojis: []
-        };
+async function sendChunksSequentially(
+    channelId: string,
+    chunks: string[],
+    baseMessage?: MessageObject,
+    options?: MessageOptions,
+    props?: SendMessageProps
+) {
+    for (let index = 0; index < chunks.length; index++) {
+        const content = chunks[index];
+        if (!content) continue;
+
+        const firstChunk = index === 0;
+        const msg = buildChunkMessage(baseMessage, content);
+        const chunkOptions = buildChunkOptions(options, content, firstChunk);
+        const chunkProps = buildChunkProps(channelId, content, props, firstChunk);
 
         try {
-            if (MessageActions.sendMessage) {
-                await Promise.resolve(MessageActions.sendMessage(channelId, msg, true, {} as any));
-            } else {
-                await Promise.resolve(MessageActions._sendMessage(channelId, msg, {} as any));
-            }
+            await sendPreparedChunk(channelId, msg, chunkOptions, chunkProps);
         } catch {
             // Keep best-effort behavior; continue attempting later chunks.
         }
@@ -447,14 +506,15 @@ export default definePlugin({
     description: "Splits long messages and includes local UI polish for Discord's long-message composer flow.",
     authors: [Devs.marcmy],
     settings,
+    dependencies: ["MessageEventsAPI"],
 
     patches: [
         {
             find: ".handleSendMessage,onResize:",
             replacement: {
                 match: /let (\i)=\i\.\i\.parse\((\i),.+?\.getSendMessageOptions\(\{.+?\}\)?;(?=.+?(\i)\.flags=)(?<=\)\((\{.+?})\)\.then.+?)/,
-                replace: (m, parsedMessage, channel, replyOptions, extra) =>
-                    `${m}$self.handleEarlySplit(${channel}.id,${parsedMessage},${extra},${replyOptions});`
+                replace: (m, parsedMessage, channel, options, props) =>
+                    `${m}if($self.handleEarlySplit(${channel}.id,${parsedMessage},${options},${props}))return{shouldClear:true,shouldRefocus:true};`
             }
         }
     ],
@@ -508,21 +568,18 @@ export default definePlugin({
         }
 
         if (MessageActions?.sendMessage) {
-            this.originalSendMessage = MessageActions.sendMessage.bind(MessageActions);
-            MessageActions.sendMessage = (channelId, msg, waitForChannelReady, options) => {
-                if (msg?.content?.length > MAX_MESSAGE_LENGTH) {
-                    const chunks = splitContent(msg.content, MAX_MESSAGE_LENGTH);
-                    if (chunks.length > 1) {
-                        msg.content = chunks.shift()!;
-                        setTimeout(() => {
-                            sendFollowUps(channelId, msg, options, chunks);
-                        }, 0);
-                    }
+        this.originalSendMessage = MessageActions.sendMessage.bind(MessageActions);
+        MessageActions.sendMessage = (channelId, msg, waitForChannelReady, options) => {
+            if (msg?.content?.length > MAX_MESSAGE_LENGTH) {
+                const chunks = splitContent(msg.content, MAX_MESSAGE_LENGTH);
+                if (chunks.length > 1) {
+                    return sendChunksSequentially(channelId, chunks, msg, options);
                 }
+            }
 
-                return this.originalSendMessage!(channelId, msg, waitForChannelReady, options);
-            };
-        }
+            return this.originalSendMessage!(channelId, msg, waitForChannelReady, options);
+        };
+    }
 
         const uploadTargets = new Set<Record<string, any>>();
         const uploadHandlerModule = safeGet(() => UploadHandler as any);
@@ -882,26 +939,26 @@ export default definePlugin({
         this.restoreUiNodes();
     },
 
-    handleEarlySplit(channelId: string, msg: MessageObject, options: MessageOptions | undefined, replyOptions: MessageOptions["replyOptions"]) {
-        if (!msg.content && !options?.uploads?.length) return;
-        if ((msg as any)[HANDLED_FLAG]) return;
-
-        if (options) options.replyOptions = replyOptions;
+    handleEarlySplit(
+        channelId: string,
+        msg: MessageObject,
+        options: MessageOptions | undefined,
+        props: SendMessageProps | undefined
+    ) {
+        if (!msg.content && !(props as any)?.uploads?.length) return false;
+        if ((msg as any)[HANDLED_FLAG]) return false;
+        if (hasAutoTextUpload(props as any) || hasLiveAutoTextUpload(channelId)) return false;
 
         const content = getLongMessageContentSync(channelId, msg);
-        if (content.length <= MAX_MESSAGE_LENGTH) return;
+        if (content.length <= MAX_MESSAGE_LENGTH) return false;
 
         const chunks = splitContent(content, MAX_MESSAGE_LENGTH);
-        if (chunks.length <= 1) return;
-
-        (msg as any)[HANDLED_FLAG] = true;
-        msg.content = chunks.shift()!;
-        if (options) options.content = msg.content;
-        stripAutoTextUploads(options);
+        if (chunks.length <= 1) return false;
 
         setTimeout(() => {
-            sendFollowUps(channelId, msg, options, chunks);
+            void sendChunksSequentially(channelId, chunks, msg, options, props);
         }, 0);
+        return true;
     },
 
     handleTooLongWarning(props: any, fallback?: (props: any) => any) {
@@ -929,18 +986,19 @@ export default definePlugin({
         if (this.sendingSplit) return;
         this.sendingSplit = true;
 
-        try {
-            const chunks = splitContent(content, MAX_MESSAGE_LENGTH);
-            if (chunks.length === 0) return;
-            void sendChunksSequentially(channelId, chunks);
-
-            clearComposerState(channelId);
-        } finally {
+        const chunks = splitContent(content, MAX_MESSAGE_LENGTH);
+        if (chunks.length === 0) {
             this.sendingSplit = false;
+            return;
         }
+
+        clearComposerState(channelId);
+        void sendChunksSequentially(channelId, chunks).finally(() => {
+            this.sendingSplit = false;
+        });
     },
 
-    async onBeforeMessageSend(channelId, msg, options) {
+    async onBeforeMessageSend(channelId, msg, options, props) {
         if (!msg.content && !options?.uploads?.length) return;
         if ((msg as any)[HANDLED_FLAG]) return;
 
@@ -956,13 +1014,9 @@ export default definePlugin({
         const chunks = splitContent(content, MAX_MESSAGE_LENGTH);
         if (chunks.length <= 1) return;
 
-        (msg as any)[HANDLED_FLAG] = true;
-        msg.content = chunks.shift()!;
-        if (options) options.content = msg.content;
-        stripAutoTextUploads(options);
-
         setTimeout(() => {
-            sendFollowUps(channelId, msg, options, chunks);
+            void sendChunksSequentially(channelId, chunks, msg, options, props);
         }, 0);
+        return { cancel: true };
     }
 });
