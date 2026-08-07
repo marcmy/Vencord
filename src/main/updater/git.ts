@@ -49,10 +49,6 @@ async function gitConfig(key: string) {
     }
 }
 
-function executable(name: string) {
-    return process.platform === "win32" ? `${name}.cmd` : name;
-}
-
 async function getCurrentBranch() {
     return (await git("branch", "--show-current")).stdout.trim();
 }
@@ -128,8 +124,13 @@ async function pull() {
 async function build() {
     const opts = { cwd: VENCORD_SRC_DIR };
 
-    if (isFlatpak) await execFile("flatpak-spawn", ["--host", "pnpm", "install"], opts);
-    else await execFile(executable("pnpm"), ["install"], opts);
+    if (isFlatpak) {
+        await execFile("flatpak-spawn", ["--host", "pnpm", "install"], opts);
+    } else if (process.platform === "win32") {
+        await execFile(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", "pnpm.cmd install"], opts);
+    } else {
+        await execFile("pnpm", ["install"], opts);
+    }
 
     const command = isFlatpak ? "flatpak-spawn" : "node";
     const args = isFlatpak ? ["--host", "node", "scripts/build/build.mjs"] : ["scripts/build/build.mjs"];
