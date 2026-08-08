@@ -7,6 +7,11 @@ updates:
       day: "thursday"
       time: "18:00"
       timezone: "America/New_York"
+    ignore:
+      # ts-patch 4.x requires Node >=22.15.0, while Vencord currently supports Node >=22.
+      # Keep major 4 deferred until the project intentionally raises its Node floor.
+      - dependency-name: "ts-patch"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
