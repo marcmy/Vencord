@@ -1,0 +1,34 @@
+name: Refresh final dependency lockfile
+
+on:
+  push:
+    branches:
+      - chore/deps-security-final
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lockfile:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: chore/deps-security-final
+      - uses: pnpm/action-setup@v6
+      - name: Use Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Refresh pnpm lockfile
+        run: pnpm install --lockfile-only
+      - name: Commit lockfile and remove temporary workflow
+        shell: pwsh
+        run: |
+          git config user.name "marcmy"
+          git config user.email "21000174+marcmy@users.noreply.github.com"
+          git add pnpm-lock.yaml
+          git rm .github/workflows/refresh-deps-final.yml
+          git commit -m "chore(deps): refresh pnpm lockfile"
+          git push
