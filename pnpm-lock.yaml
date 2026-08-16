@@ -182,8 +182,8 @@ importers:
         specifier: ^2.22.2
         version: 2.30.1
       ts-pattern:
-        specifier: ^5.6.0
-        version: 5.6.2
+        specifier: ^5.9.0
+        version: 5.9.0
       type-fest:
         specifier: ^5.7.0
         version: 5.7.0
@@ -2402,9 +2402,6 @@ packages:
   ts-patch@3.3.0:
     resolution: {integrity: sha512-zAOzDnd5qsfEnjd9IGy1IRuvA7ygyyxxdxesbhMdutt8AHFjD8Vw8hU2rMF89HX1BKRWFYqKHrO8Q6lw0NeUZg==}
     hasBin: true
-
-  ts-pattern@5.6.2:
-    resolution: {integrity: sha512-d4IxJUXROL5NCa3amvMg6VQW2HVtZYmUTPfvVtO7zJWGYLJ+mry9v2OmYm+z67aniQoQ8/yFNadiEwtNS9qQiw==}
 
   ts-pattern@5.9.0:
     resolution: {integrity: sha512-6s5V71mX8qBUmlgbrfL33xDUwO0fq48rxAu2LBE11WBeGdpCPOsXksQbZJHvHwhrd3QjUusd3mAOM5Gg0mFBLg==}
@@ -5122,8 +5119,6 @@ snapshots:
       resolve: 1.22.10
       semver: 7.7.1
       strip-ansi: 6.0.1
-
-  ts-pattern@5.6.2: {}
 
   ts-pattern@5.9.0: {}
 
