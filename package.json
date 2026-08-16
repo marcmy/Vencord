@@ -48,7 +48,7 @@
         "@stylistic/eslint-plugin": "^5.10.0",
         "@types/chrome": "^0.2.5",
         "@types/lodash": "^4.17.24",
-        "@types/node": "^26.1.2",
+        "@types/node": "^26.2.0",
         "@types/react": "19.1.0",
         "@types/react-dom": "19.1.0",
         "@types/yazl": "^3.3.1",
