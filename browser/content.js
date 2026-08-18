@@ -15,7 +15,7 @@ document.addEventListener(
         });
 
         chrome.runtime.onMessage.addListener(request => {
-            window.postMessage({ type: "vencord:keybinds", meta: request.command });  
+            window.postMessage({ type: "vencord:keybinds", meta: request.command });
         })
 
         window.addEventListener('message', function(event) {
