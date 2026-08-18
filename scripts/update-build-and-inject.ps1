@@ -160,11 +160,13 @@ try {
         Invoke-UpstreamMerge -RemoteName $UpstreamRemote -BranchName $UpstreamBranch -ForkRemote $Remote -ForkBranch $GitBranch
     }
 
-    Invoke-NativeStep "Publishing the exact source revision that will be built..." "git" @("push", $Remote, "HEAD:$GitBranch")
-
-    Invoke-NativeStep "Installing dependencies..." "pnpm" @("--config.update-notifier=false", "install")
+    # A frozen install guarantees the build uses the committed lockfile exactly.
+    Invoke-NativeStep "Installing dependencies from the committed lockfile..." "pnpm" @("--config.update-notifier=false", "install", "--frozen-lockfile")
 
     Invoke-NativeStep "Building Vencord..." "pnpm" @("build")
+
+    # Only publish the revision after dependency installation and the build succeed.
+    Invoke-NativeStep "Publishing the verified source revision..." "git" @("push", $Remote, "HEAD:$GitBranch")
 
     $injectArgs = @("inject", "-branch", $DiscordBranch)
 
