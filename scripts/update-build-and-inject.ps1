@@ -5,7 +5,8 @@ param(
     [string]$UpstreamBranch = "main",
     [string]$DiscordBranch = "stable",
     [switch]$SkipUpstreamSync,
-    [switch]$SkipOpenAsar
+    [switch]$SkipOpenAsar,
+    [switch]$FullVerify
 )
 
 $ErrorActionPreference = "Stop"
@@ -163,9 +164,18 @@ try {
     # A frozen install guarantees the build uses the committed lockfile exactly.
     Invoke-NativeStep "Installing dependencies from the committed lockfile..." "pnpm" @("--config.update-notifier=false", "install", "--frozen-lockfile")
 
+    if ($FullVerify) {
+        Write-Host ""
+        Write-Host "Running full verification before publishing..." -ForegroundColor Cyan
+        Invoke-NativeStep "Checking peer dependencies..." "pnpm" @("peers", "check")
+        Invoke-NativeStep "Auditing high-severity vulnerabilities..." "pnpm" @("audit", "--audit-level", "high")
+        Invoke-NativeStep "Type-checking Vencord..." "pnpm" @("testTsc")
+        Invoke-NativeStep "Linting Vencord..." "pnpm" @("lint")
+    }
+
     Invoke-NativeStep "Building Vencord..." "pnpm" @("build")
 
-    # Only publish the revision after dependency installation and the build succeed.
+    # Only publish the revision after dependency installation, optional full verification, and the build succeed.
     Invoke-NativeStep "Publishing the verified source revision..." "git" @("push", $Remote, "HEAD:$GitBranch")
 
     $injectArgs = @("inject", "-branch", $DiscordBranch)
