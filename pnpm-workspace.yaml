@@ -15,6 +15,11 @@ peerDependencyRules:
   ignoreMissing:
     - eslint-plugin-import
     - eslint
+  allowedVersions:
+    "eslint-plugin-import@2.31.0>eslint": "10"
+    "eslint-plugin-path-alias@2.1.0>eslint": "10"
+    "eslint-plugin-react@7.37.5>eslint": "10"
+    "@vencord/discord-types@1.0.2>@types/react": "18.3.1"
 allowedDeprecatedVersions:
   source-map-resolve: '*'
   resolve-url: '*'
