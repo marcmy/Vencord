@@ -27,6 +27,57 @@ function Invoke-NativeStep {
     }
 }
 
+function Invoke-UpstreamMerge {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RemoteName,
+        [Parameter(Mandatory = $true)]
+        [string]$BranchName,
+        [Parameter(Mandatory = $true)]
+        [string]$ForkRemote,
+        [Parameter(Mandatory = $true)]
+        [string]$ForkBranch
+    )
+
+    $upstreamRef = "$RemoteName/$BranchName"
+    Write-Host "Merging $upstreamRef..."
+    & git merge --no-edit $upstreamRef
+    $mergeExitCode = $LASTEXITCODE
+
+    if ($mergeExitCode -eq 0) {
+        return
+    }
+
+    $conflictedFiles = @(& git diff --name-only --diff-filter=U)
+    if ($LASTEXITCODE -ne 0) {
+        throw "git merge failed with exit code $mergeExitCode, and conflicted files could not be determined."
+    }
+
+    if ($conflictedFiles.Count -gt 0) {
+        Write-Host ""
+        Write-Host "Upstream merge stopped because conflicts need to be resolved." -ForegroundColor Yellow
+        Write-Host "Conflicted files:" -ForegroundColor Yellow
+        foreach ($file in $conflictedFiles) {
+            Write-Host "  - $file" -ForegroundColor Yellow
+        }
+
+        Write-Host ""
+        Write-Host "The merge has been left in progress so you can resolve it." -ForegroundColor Yellow
+        Write-Host "After resolving the files, run:" -ForegroundColor Yellow
+        Write-Host "  git add -A"
+        Write-Host "  git commit"
+        Write-Host "  git push $ForkRemote $ForkBranch"
+        Write-Host "  .\update.cmd"
+        Write-Host ""
+        Write-Host "To abandon the merge instead, run:" -ForegroundColor Yellow
+        Write-Host "  git merge --abort"
+
+        throw "Upstream merge has unresolved conflicts. Resolve them and rerun update.cmd."
+    }
+
+    throw "git merge $upstreamRef failed with exit code $mergeExitCode."
+}
+
 function Get-DiscordResourcesPath {
     param([string]$Branch)
 
@@ -106,7 +157,7 @@ try {
 
     if (-not $SkipUpstreamSync) {
         Invoke-NativeStep "Fetching Vencord upstream..." "git" @("fetch", $UpstreamRemote, $UpstreamBranch)
-        Invoke-NativeStep "Merging $UpstreamRemote/$UpstreamBranch..." "git" @("merge", "--no-edit", "$UpstreamRemote/$UpstreamBranch")
+        Invoke-UpstreamMerge -RemoteName $UpstreamRemote -BranchName $UpstreamBranch -ForkRemote $Remote -ForkBranch $GitBranch
     }
 
     Invoke-NativeStep "Publishing the exact source revision that will be built..." "git" @("push", $Remote, "HEAD:$GitBranch")
