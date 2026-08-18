@@ -7,6 +7,8 @@ updates:
       day: "thursday"
       time: "18:00"
       timezone: "America/New_York"
+    # Let upstream own routine npm version churn. Security updates remain enabled.
+    open-pull-requests-limit: 0
     ignore:
       # ts-patch 4.x requires Node >=22.15.0, while Vencord currently supports Node >=22.
       # Keep major 4 deferred until the project intentionally raises its Node floor.
