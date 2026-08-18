@@ -1,12 +1,12 @@
-name: Sync to Codeberg (disabled)
+name: Sync to Codeberg
 concurrency:
     group: ${{ github.ref }}
     cancel-in-progress: true
 on:
+    push:
     workflow_dispatch:
-
-permissions:
-    contents: read
+    schedule:
+        - cron: "0 */6 * * *"
 
 jobs:
     codeberg:
