@@ -25,3 +25,5 @@ strictPeerDependencies: false
 allowBuilds:
   esbuild: true
 pmOnFail: warn
+minimumReleaseAgeExclude:
+  - '@vencord/*'
