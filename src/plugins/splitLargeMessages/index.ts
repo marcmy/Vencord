@@ -6,8 +6,7 @@
 
 import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
-import { findByPropsLazy } from "@webpack";
-import { ChannelStore, DraftType, Forms, Modal, openModal, React, SelectedChannelStore, UploadHandler, useState } from "@webpack/common";
+import { ChannelStore, DraftType, Forms, Modal, openModal, React, SelectedChannelStore, UploadAttachmentStore, UploadHandler, UploadManager, useState } from "@webpack/common";
 
 import basePlugin from "./impl";
 
@@ -15,9 +14,8 @@ const MAX_MESSAGE_LENGTH = 2000;
 const LEADING_GUARD = "\u200b";
 const LEADING_BLANK_LINE_GUARD = "\u2800";
 const VISIBLE_BLANK_LINE_MARKER = "·";
-const TEXT_NODE = 3;
-
-const ChannelTextAreaClasses = findByPropsLazy("channelTextArea");
+const AUTO_TEXT_FILENAME = "message.txt";
+const NATIVE_FILE_GRACE_MS = 5000;
 
 type PromptToUpload = (files: File[], channel: any, draftType: number) => any;
 
@@ -29,10 +27,15 @@ type PasteLargeMessageModalProps = {
     onPasteAsFile(text: string): void;
 };
 
+type NativeFileState = {
+    expiresAt: number;
+    seen: boolean;
+};
+
 let activePlugin: any = null;
 let nativePromptToUpload: PromptToUpload | null = null;
-let pasteHandler: ((event: ClipboardEvent) => void) | null = null;
 const pasteModalChannels = new Set<string>();
+const nativeFileStates = new Map<string, NativeFileState>();
 
 function safeGet<T>(getter: () => T): T | undefined {
     try {
@@ -44,26 +47,6 @@ function safeGet<T>(getter: () => T): T | undefined {
 
 function normalizeLineEndings(text: string) {
     return text.replace(/\r\n?/g, "\n");
-}
-
-function getTargetElement(target: EventTarget | null) {
-    if (!target) return null;
-    if (target instanceof HTMLElement) return target;
-
-    const node = target as Node;
-    if (node.nodeType === TEXT_NODE) return node.parentElement;
-    return null;
-}
-
-function isChatInputTarget(target: EventTarget | null) {
-    const el = getTargetElement(target) ?? (document.activeElement as HTMLElement | null);
-    if (!el) return false;
-
-    const channelClass = safeGet(() => ChannelTextAreaClasses?.channelTextArea);
-    if (channelClass && el.closest?.(`.${channelClass}`)) return true;
-
-    if (el.isContentEditable && el.getAttribute?.("role") === "textbox") return true;
-    return el instanceof HTMLTextAreaElement;
 }
 
 function getLeadingBlankLineMode() {
@@ -154,8 +137,6 @@ function countMessageChunks(content: string, maxLen = MAX_MESSAGE_LENGTH) {
         }
 
         if (takeLength <= 0 || dropLength <= 0) {
-            // Defensive fallback for an unexpected edge case. The base plugin
-            // has the same 2,000-character hard-slice fallback when sending.
             dropLength = Math.max(1, sliceLimit);
         }
 
@@ -164,6 +145,59 @@ function countMessageChunks(content: string, maxLen = MAX_MESSAGE_LENGTH) {
     }
 
     return count;
+}
+
+function getUploadFilename(upload: any) {
+    return upload?.filename ?? upload?.item?.file?.name ?? "";
+}
+
+function hasNativeTextFileUpload(channelId: string) {
+    const uploads = safeGet(() => UploadAttachmentStore?.getUploads?.(channelId, DraftType.ChannelMessage)) ?? [];
+    return uploads.some(upload => getUploadFilename(upload) === AUTO_TEXT_FILENAME);
+}
+
+function markNativeFilePending(channelId: string) {
+    nativeFileStates.set(channelId, {
+        expiresAt: Date.now() + NATIVE_FILE_GRACE_MS,
+        seen: false
+    });
+}
+
+function isNativeFileActive(channelId: string) {
+    const state = nativeFileStates.get(channelId);
+    if (!state) return false;
+
+    if (hasNativeTextFileUpload(channelId)) {
+        state.seen = true;
+        return true;
+    }
+
+    if (state.seen || Date.now() >= state.expiresAt) {
+        nativeFileStates.delete(channelId);
+        return false;
+    }
+
+    return true;
+}
+
+function optionsContainNativeTextFile(options: any) {
+    return !!options?.uploads?.some((upload: any) => getUploadFilename(upload) === AUTO_TEXT_FILENAME);
+}
+
+function guardComposerHandler(plugin: any, property: "keydownHandler" | "clickHandler" | "submitHandler", eventName: "keydown" | "click" | "submit") {
+    const original = plugin[property];
+    if (typeof original !== "function") return;
+
+    document.removeEventListener(eventName, original, true);
+
+    const guarded = (event: Event) => {
+        const channelId = SelectedChannelStore.getChannelId();
+        if (channelId && isNativeFileActive(channelId)) return;
+        original(event);
+    };
+
+    plugin[property] = guarded;
+    document.addEventListener(eventName, guarded, true);
 }
 
 function PasteLargeMessageModal({
@@ -269,10 +303,17 @@ function openPasteChoice(channelId: string, rawText: string) {
 
                 const file = new File(
                     [normalizeLineEndings(editedText)],
-                    "message.txt",
+                    AUTO_TEXT_FILENAME,
                     { type: "text/plain" }
                 );
-                nativePromptToUpload([file], channel, DraftType.ChannelMessage);
+
+                markNativeFilePending(channelId);
+                try {
+                    nativePromptToUpload([file], channel, DraftType.ChannelMessage);
+                } catch (error) {
+                    nativeFileStates.delete(channelId);
+                    throw error;
+                }
             }
         });
     });
@@ -282,6 +323,8 @@ function openPasteChoice(channelId: string, rawText: string) {
 
 const originalStart = (basePlugin as any).start;
 const originalStop = (basePlugin as any).stop;
+const originalPolishComposerUi = (basePlugin as any).polishComposerUi;
+const originalOnBeforeMessageSend = (basePlugin as any).onBeforeMessageSend;
 
 export default definePlugin({
     ...(basePlugin as any),
@@ -292,12 +335,52 @@ export default definePlugin({
     patches: (basePlugin as any).patches,
 
     openLongMessageEditor(channelId: string, text: string) {
-        return openPasteChoice(channelId, text);
+        const content = normalizeLineEndings(text);
+        if (!content || content.length <= MAX_MESSAGE_LENGTH) return false;
+
+        // Discord may already have materialized the large paste as message.txt.
+        // Remove that transient upload before opening our choice modal; otherwise
+        // the base plugin's UI poller sees it after close and reopens forever.
+        safeGet(() => UploadManager?.clearAll?.(channelId, DraftType.ChannelMessage));
+        this.restoreUiNodes?.();
+
+        return openPasteChoice(channelId, content);
+    },
+
+    polishComposerUi() {
+        const channelId = SelectedChannelStore.getChannelId();
+        if (channelId && isNativeFileActive(channelId)) {
+            // The user explicitly chose Discord's file-send path. Do not let the
+            // inherited auto-message.txt cleanup hide it or reopen the modal.
+            this.restoreUiNodes?.();
+            return;
+        }
+
+        return originalPolishComposerUi?.call(this);
+    },
+
+    async onBeforeMessageSend(channelId: string, msg: any, options: any, props: any) {
+        const state = nativeFileStates.get(channelId);
+        if (state) {
+            const hasFile = optionsContainNativeTextFile(options) || hasNativeTextFileUpload(channelId);
+            if (hasFile) {
+                nativeFileStates.delete(channelId);
+                return;
+            }
+
+            if (state.seen || Date.now() >= state.expiresAt) {
+                nativeFileStates.delete(channelId);
+            }
+        }
+
+        return originalOnBeforeMessageSend?.call(this, channelId, msg, options, props);
     },
 
     start() {
         activePlugin = this;
 
+        // Capture Discord's original implementation before the inherited plugin
+        // wraps promptToUpload. This is the escape hatch for "Paste as File".
         const promptToUpload = safeGet(() => UploadHandler?.promptToUpload);
         nativePromptToUpload = typeof promptToUpload === "function"
             ? promptToUpload.bind(UploadHandler)
@@ -305,31 +388,17 @@ export default definePlugin({
 
         originalStart?.call(this);
 
-        pasteHandler = event => {
-            if (event.defaultPrevented) return;
-            if (!isChatInputTarget(event.target)) return;
-            if (event.clipboardData?.files?.length) return;
-
-            const text = event.clipboardData?.getData("text/plain") ?? "";
-            if (normalizeLineEndings(text).length <= MAX_MESSAGE_LENGTH) return;
-
-            const channelId = SelectedChannelStore.getChannelId();
-            if (!channelId || !openPasteChoice(channelId, text)) return;
-
-            event.preventDefault();
-            event.stopImmediatePropagation();
-        };
-
-        document.addEventListener("paste", pasteHandler, true);
+        // The inherited handlers normally hijack Enter/click/submit whenever a
+        // message.txt upload exists. Guard them only while the user has explicitly
+        // chosen the native file path, so Discord can send the file normally.
+        guardComposerHandler(this, "keydownHandler", "keydown");
+        guardComposerHandler(this, "clickHandler", "click");
+        guardComposerHandler(this, "submitHandler", "submit");
     },
 
     stop() {
-        if (pasteHandler) {
-            document.removeEventListener("paste", pasteHandler, true);
-            pasteHandler = null;
-        }
-
         pasteModalChannels.clear();
+        nativeFileStates.clear();
         nativePromptToUpload = null;
 
         try {
