@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { Devs } from "@utils/constants";
+import definePlugin from "@utils/types";
 import { findByPropsLazy } from "@webpack";
 import { ChannelStore, DraftType, Forms, Modal, openModal, React, SelectedChannelStore, UploadHandler, useState } from "@webpack/common";
 
@@ -27,6 +29,7 @@ type PasteLargeMessageModalProps = {
     onPasteAsFile(text: string): void;
 };
 
+let activePlugin: any = null;
 let nativePromptToUpload: PromptToUpload | null = null;
 let pasteHandler: ((event: ClipboardEvent) => void) | null = null;
 const pasteModalChannels = new Set<string>();
@@ -64,7 +67,9 @@ function isChatInputTarget(target: EventTarget | null) {
 }
 
 function getLeadingBlankLineMode() {
-    return (basePlugin as any).settings?.store?.leadingBlankLineMode ?? "trim";
+    return activePlugin?.settings?.store?.leadingBlankLineMode
+        ?? (basePlugin as any).settings?.store?.leadingBlankLineMode
+        ?? "trim";
 }
 
 function findSplitIndex(text: string) {
@@ -257,7 +262,7 @@ function openPasteChoice(channelId: string, rawText: string) {
             initialText: content,
             onClose: close,
             onPasteMessages: (editedText: string) => {
-                (basePlugin as any).sendSplitFromDraft(channelId, editedText);
+                activePlugin?.sendSplitFromDraft(channelId, editedText);
             },
             onPasteAsFile: (editedText: string) => {
                 if (!nativePromptToUpload) return;
@@ -275,48 +280,58 @@ function openPasteChoice(channelId: string, rawText: string) {
     return true;
 }
 
-const plugin = basePlugin as any;
-const originalStart = plugin.start;
-const originalStop = plugin.stop;
+const originalStart = (basePlugin as any).start;
+const originalStop = (basePlugin as any).stop;
 
-plugin.name = "SplitLargeMessages";
-plugin.description = "Splits large messages and lets long pastes be sent as multiple messages or Discord's native text-file upload.";
+export default definePlugin({
+    ...(basePlugin as any),
+    name: "SplitLargeMessages",
+    description: "Splits large messages and lets long pastes be sent as multiple messages or Discord's native text-file upload.",
+    authors: [Devs.marcmy],
+    dependencies: ["MessageEventsAPI"],
+    patches: (basePlugin as any).patches,
 
-plugin.start = function () {
-    const promptToUpload = safeGet(() => UploadHandler?.promptToUpload);
-    nativePromptToUpload = typeof promptToUpload === "function"
-        ? promptToUpload.bind(UploadHandler)
-        : null;
+    start() {
+        activePlugin = this;
 
-    originalStart?.call(this);
+        const promptToUpload = safeGet(() => UploadHandler?.promptToUpload);
+        nativePromptToUpload = typeof promptToUpload === "function"
+            ? promptToUpload.bind(UploadHandler)
+            : null;
 
-    pasteHandler = event => {
-        if (event.defaultPrevented) return;
-        if (!isChatInputTarget(event.target)) return;
-        if (event.clipboardData?.files?.length) return;
+        originalStart?.call(this);
 
-        const text = event.clipboardData?.getData("text/plain") ?? "";
-        if (normalizeLineEndings(text).length <= MAX_MESSAGE_LENGTH) return;
+        pasteHandler = event => {
+            if (event.defaultPrevented) return;
+            if (!isChatInputTarget(event.target)) return;
+            if (event.clipboardData?.files?.length) return;
 
-        const channelId = SelectedChannelStore.getChannelId();
-        if (!channelId || !openPasteChoice(channelId, text)) return;
+            const text = event.clipboardData?.getData("text/plain") ?? "";
+            if (normalizeLineEndings(text).length <= MAX_MESSAGE_LENGTH) return;
 
-        event.preventDefault();
-        event.stopImmediatePropagation();
-    };
+            const channelId = SelectedChannelStore.getChannelId();
+            if (!channelId || !openPasteChoice(channelId, text)) return;
 
-    document.addEventListener("paste", pasteHandler, true);
-};
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        };
 
-plugin.stop = function () {
-    if (pasteHandler) {
-        document.removeEventListener("paste", pasteHandler, true);
-        pasteHandler = null;
+        document.addEventListener("paste", pasteHandler, true);
+    },
+
+    stop() {
+        if (pasteHandler) {
+            document.removeEventListener("paste", pasteHandler, true);
+            pasteHandler = null;
+        }
+
+        pasteModalChannels.clear();
+        nativePromptToUpload = null;
+
+        try {
+            originalStop?.call(this);
+        } finally {
+            activePlugin = null;
+        }
     }
-
-    pasteModalChannels.clear();
-    nativePromptToUpload = null;
-    originalStop?.call(this);
-};
-
-export default plugin;
+});
