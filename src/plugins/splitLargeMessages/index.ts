@@ -291,6 +291,10 @@ export default definePlugin({
     dependencies: ["MessageEventsAPI"],
     patches: (basePlugin as any).patches,
 
+    openLongMessageEditor(channelId: string, text: string) {
+        return openPasteChoice(channelId, text);
+    },
+
     start() {
         activePlugin = this;
 
