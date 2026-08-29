@@ -74,7 +74,7 @@ async function tryLookup(query: string): Promise<Record<string, any> | undefined
 
 function escapeMusicBrainzQueryValue(value: string): string {
     // MusicBrainz uses Lucene query syntax, so user-controlled values must not be able to alter the query.
-    return value.replace(/([+\-!(){}[\]^"~*?:\\/]|&&|\|\|)/g, "\\$1");
+    return value.replace(/[+\-!(){}[\]^"~*?:\\/&|]/g, "\\$&");
 }
 
 async function getUrls(
