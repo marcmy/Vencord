@@ -62,13 +62,19 @@ async function fetchCoverArt(releaseMBID: string, releaseGroupMBID: string, orig
 async function tryLookup(query: string): Promise<Record<string, any> | undefined> {
     const params = new URLSearchParams({
         fmt: "json",
-        limit: "1"
+        limit: "1",
+        query
     });
-    return await fetch("https://musicbrainz.org/ws/2/recording/?" + params + "&query=" + query, {
+    return await fetch("https://musicbrainz.org/ws/2/recording/?" + params, {
         headers: { "User-Agent": VENCORD_USER_AGENT }
     })
         .then(res => res.ok ? res.json() : Promise.reject(new Error(`${res.status} ${res.statusText}`)))
         .then(json => json.recordings?.[0]);
+}
+
+function escapeMusicBrainzQueryValue(value: string): string {
+    // MusicBrainz uses Lucene query syntax, so user-controlled values must not be able to alter the query.
+    return value.replace(/([+\-!(){}[\]^"~*?:\\/]|&&|\|\|)/g, "\\$1");
 }
 
 async function getUrls(
@@ -95,12 +101,10 @@ async function getUrls(
     }
 
     // If no MBIDs are present, try searching MusicBrainz: first by ISRC (if present), then by name.
-    const nameQuery = encodeURIComponent(
-        `artist:"${artistName}" AND recording:"${trackName}"${releaseName ? ` AND release:"${releaseName}"` : ""}`
-    ).replace(/[!()*\-~]/g, "\\$&");
+    const nameQuery = `artist:"${escapeMusicBrainzQueryValue(artistName)}" AND recording:"${escapeMusicBrainzQueryValue(trackName)}"${releaseName ? ` AND release:"${escapeMusicBrainzQueryValue(releaseName)}"` : ""}`;
 
     const queries = additionalInfo?.isrc
-        ? [encodeURIComponent(`isrc:${additionalInfo.isrc}`), nameQuery]
+        ? [`isrc:${escapeMusicBrainzQueryValue(additionalInfo.isrc)}`, nameQuery]
         : [nameQuery];
 
     for (const query of queries) {
