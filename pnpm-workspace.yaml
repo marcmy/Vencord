@@ -9,7 +9,7 @@ overrides:
   'fast-uri@>=3.0.0 <3.1.7': 3.1.7
   # Preserve the path-alias plugin's match/list API without snapdragon's vulnerable decoder.
   'eslint-plugin-path-alias>nanomatch': npm:micromatch@4.0.8
-  'js-yaml@>=4.0.0 <4.3.1': 4.3.1
+  'js-yaml@>=4.0.0 <4.3.2': 4.3.2
   'minimatch@<3.1.4': 3.1.4
   'postcss@<8.5.23': 8.5.23
 patchedDependencies:
