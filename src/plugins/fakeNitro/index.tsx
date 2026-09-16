@@ -540,7 +540,7 @@ export default definePlugin({
             if (typeof node === "string") return node.trim() === "" ? 0 : null;
             if (typeof node !== "object") return null;
 
-            const props = node.props;
+            const { props } = node;
             if (!props) return null;
 
             if (typeof props.href === "string" && fakeNitroEmojiRegex.test(props.href)) {
@@ -548,13 +548,12 @@ export default definePlugin({
                 return 1;
             }
 
-            const emojiNode = props.node;
+            const { node: emojiNode, emoji } = props;
             if (
                 emojiNode && typeof emojiNode === "object"
                 && (emojiNode.type === "emoji" || emojiNode.type === "customEmoji")
             ) return 1;
 
-            const emoji = props.emoji;
             if (
                 emoji && typeof emoji === "object"
                 && (typeof emoji.emojiId === "string" || typeof emoji.surrogate === "string")
@@ -582,16 +581,15 @@ export default definePlugin({
 
         if (!content || typeof content !== "object") return;
 
-        const props = content.props;
+        const { props } = content;
         if (!props) return;
 
-        const emojiNode = props.node;
+        const { node: emojiNode, emoji } = props;
         if (
             emojiNode && typeof emojiNode === "object"
             && (emojiNode.type === "emoji" || emojiNode.type === "customEmoji")
         ) emojiNode.jumboable = true;
 
-        const emoji = props.emoji;
         if (
             emoji && typeof emoji === "object"
             && (typeof emoji.emojiId === "string" || typeof emoji.surrogate === "string")
