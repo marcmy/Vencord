@@ -225,7 +225,7 @@ export default definePlugin({
                 },
                 {
                     match: /(?<=canUsePremiumAppIcons:function\(\i\)\{)/,
-                    replace: "return true"
+                    replace: "return true;"
                 }
             ],
         },
