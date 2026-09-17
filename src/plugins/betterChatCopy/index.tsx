@@ -294,7 +294,7 @@ async function getLatestConversationText(channelId: string, count: number) {
 function clampMessageCount(value: string | number) {
     const count = Number(value);
     if (!Number.isFinite(count)) return settings.store.defaultMessageCount;
-    return Math.max(1, Math.min(500, Math.round(count)));
+    return Math.max(1, Math.min(2000, Math.round(count)));
 }
 
 function openCopyMessagesModal(message: Message) {
