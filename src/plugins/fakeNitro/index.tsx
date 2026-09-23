@@ -74,6 +74,23 @@ const fakeNitroGifStickerRegex = /\/attachments\/\d+?\/\d+?\/(\d+?)\.gif/;
 const hyperLinkRegex = /\[.+?\]\((https?:\/\/.+?)\)/;
 const mediaSizes = [16, 32, 48, 56, 64, 96, 128, 160, 256, 512, 1024];
 
+function isEmojiReactNode(node: any) {
+    const props = node?.props;
+    if (!props) return false;
+
+    const { node: emojiNode, emoji } = props;
+    return Boolean((
+        emojiNode && typeof emojiNode === "object"
+        && (emojiNode.type === "emoji" || emojiNode.type === "customEmoji")
+    ) || (
+        emoji && typeof emoji === "object"
+        && (typeof emoji.emojiId === "string" || typeof emoji.surrogate === "string")
+    ) || (
+        typeof props.jumboable === "boolean"
+        && (typeof props.emojiId === "string" || typeof props.emojiName === "string" || typeof props.src === "string")
+    ));
+}
+
 const DEFAULT_EMOJI_SIZE = 48;
 const DEFAULT_STICKER_SIZE = 160;
 const MAX_JUMBO_EMOJIS = 27;
@@ -499,7 +516,7 @@ export default definePlugin({
             content[0] || content.shift();
         } else if (typeof firstContent?.props?.children === "string") {
             firstContent.props.children = firstContent.props.children.trimStart();
-            firstContent.props.children || content.shift();
+            if (!firstContent.props.children && !isEmojiReactNode(firstContent)) content.shift();
         }
 
         const lastIndex = content.length - 1;
@@ -509,7 +526,7 @@ export default definePlugin({
             content[lastIndex] || content.pop();
         } else if (typeof lastContent?.props?.children === "string") {
             lastContent.props.children = lastContent.props.children.trimEnd();
-            lastContent.props.children || content.pop();
+            if (!lastContent.props.children && !isEmojiReactNode(lastContent)) content.pop();
         }
     },
 
@@ -986,13 +1003,10 @@ export default definePlugin({
             }
 
             if (s.enableEmojiBypass) {
-                for (const emoji of messageObj.validNonShortcutEmojis) {
+                for (const emoji of messageObj.validNonShortcutEmojis ?? []) {
                     if (this.canUseEmote(emoji, channelId)) continue;
 
-                    hasBypass = true;
-
                     const emojiSize = s.emojiSize ?? DEFAULT_EMOJI_SIZE;
-                    const emojiString = `<${emoji.animated ? "a" : ""}:${emoji.originalName || emoji.name}:${emoji.id}>`;
 
                     const url = new URL(IconUtils.getEmojiURL({ id: emoji.id, animated: emoji.animated, size: emojiSize }));
                     url.searchParams.set("size", emojiSize.toString());
@@ -1001,9 +1015,18 @@ export default definePlugin({
 
                     const linkText = s.hyperLinkText.replaceAll("{{NAME}}", emoji.name);
 
-                    messageObj.content = messageObj.content.replace(emojiString, (match, offset, origStr) => {
+                    const emojiTagRegex = /(?<!\\)<a?:[^:\s]+:(\d+)>/g;
+                    let replacedEmoji = false;
+
+                    messageObj.content = messageObj.content.replace(emojiTagRegex, (match, emojiId, offset, origStr) => {
+                        if (emojiId !== String(emoji.id)) return match;
+
+                        replacedEmoji = true;
                         return `${getWordBoundary(origStr, offset - 1)}${s.useHyperLinks ? `[${linkText}](${url})` : url}${getWordBoundary(origStr, offset + match.length)}`;
                     });
+
+                    if (!replacedEmoji) continue;
+                    hasBypass = true;
                 }
             }
 
