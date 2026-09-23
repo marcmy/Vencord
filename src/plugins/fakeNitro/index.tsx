@@ -74,6 +74,12 @@ const fakeNitroGifStickerRegex = /\/attachments\/\d+?\/\d+?\/(\d+?)\.gif/;
 const hyperLinkRegex = /\[.+?\]\((https?:\/\/.+?)\)/;
 const mediaSizes = [16, 32, 48, 56, 64, 96, 128, 160, 256, 512, 1024];
 
+function getFakeNitroLinkUrl(node: any, ...patterns: Array<RegExp>) {
+    const props = node?.props;
+    const candidates = [node?.target, node?.href, node?.url, props?.href, props?.url, props?.target];
+    return candidates.find(value => typeof value === "string" && patterns.some(pattern => pattern.test(value)));
+}
+
 function isEmojiReactNode(node: any) {
     const props = node?.props;
     if (!props) return false;
@@ -557,13 +563,13 @@ export default definePlugin({
             if (typeof node === "string") return node.trim() === "" ? 0 : null;
             if (typeof node !== "object") return null;
 
-            const { props } = node;
-            if (!props) return null;
-
-            if (typeof props.href === "string" && fakeNitroEmojiRegex.test(props.href)) {
+            if (getFakeNitroLinkUrl(node, fakeNitroEmojiRegex)) {
                 hasFakeNitroEmoji = true;
                 return 1;
             }
+
+            const { props } = node;
+            if (!props) return null;
 
             const { node: emojiNode, emoji } = props;
             if (
@@ -635,8 +641,8 @@ export default definePlugin({
 
         let nextIndex = content.length;
 
-        const transformLinkChild = (child: ReactElement<any>) => {
-            const href = child?.props?.href;
+        const transformLinkChild = (child: ReactElement<any>, linkUrl?: string) => {
+            const href = linkUrl ?? getFakeNitroLinkUrl(child, fakeNitroEmojiRegex, fakeNitroStickerRegex, fakeNitroGifStickerRegex) ?? child?.props?.href;
             if (typeof href !== "string") return child;
 
             if (settings.store.transformEmojis) {
@@ -678,7 +684,7 @@ export default definePlugin({
 
             // Discord may mark a CDN link as untrusted after the server echoes the sent message.
             // Still transform known FakeNitro URLs so the accompanying image embed can be hidden safely.
-            const href = child?.props?.href;
+            const href = getFakeNitroLinkUrl(child, fakeNitroEmojiRegex, fakeNitroStickerRegex, fakeNitroGifStickerRegex);
             if (
                 typeof href === "string"
                 && (
@@ -849,7 +855,7 @@ export default definePlugin({
     },
 
     shouldKeepEmojiLink(link: any) {
-        return link.target && fakeNitroEmojiRegex.test(link.target);
+        return getFakeNitroLinkUrl(link, fakeNitroEmojiRegex) != null;
     },
 
     addFakeNotice(type: FakeNoticeType, node: Array<ReactNode>, fake: boolean) {
