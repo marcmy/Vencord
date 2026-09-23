@@ -636,12 +636,15 @@ export default definePlugin({
         let nextIndex = content.length;
 
         const transformLinkChild = (child: ReactElement<any>) => {
+            const href = child?.props?.href;
+            if (typeof href !== "string") return child;
+
             if (settings.store.transformEmojis) {
-                const fakeNitroMatch = child.props.href.match(fakeNitroEmojiRegex);
+                const fakeNitroMatch = href.match(fakeNitroEmojiRegex);
                 if (fakeNitroMatch) {
                     let url: URL | null = null;
                     try {
-                        url = new URL(child.props.href);
+                        url = new URL(href);
                     } catch { }
 
                     const emojiName = EmojiStore.getCustomEmojiById(fakeNitroMatch[1])?.name ?? url?.searchParams.get("name") ?? "FakeNitroEmoji";
@@ -658,9 +661,9 @@ export default definePlugin({
             }
 
             if (settings.store.transformStickers) {
-                if (fakeNitroStickerRegex.test(child.props.href)) return null;
+                if (fakeNitroStickerRegex.test(href)) return null;
 
-                const gifMatch = child.props.href.match(fakeNitroGifStickerRegex);
+                const gifMatch = href.match(fakeNitroGifStickerRegex);
                 if (gifMatch) {
                     // There is no way to differentiate a regular gif attachment from a fake nitro animated sticker, so we check if the StickersStore contains the id of the fake sticker
                     if (StickersStore.getStickerById(gifMatch[1])) return null;
@@ -672,6 +675,18 @@ export default definePlugin({
 
         const transformChild = (child: ReactElement<any>) => {
             if (child?.props?.trusted != null) return transformLinkChild(child);
+
+            // Discord may mark a CDN link as untrusted after the server echoes the sent message.
+            // Still transform known FakeNitro URLs so the accompanying image embed can be hidden safely.
+            const href = child?.props?.href;
+            if (
+                typeof href === "string"
+                && (
+                    settings.store.transformEmojis && fakeNitroEmojiRegex.test(href)
+                    || settings.store.transformStickers && (fakeNitroStickerRegex.test(href) || fakeNitroGifStickerRegex.test(href))
+                )
+            ) return transformLinkChild(child);
+
             if (child?.props?.children != null) {
                 if (!Array.isArray(child.props.children)) {
                     child.props.children = modifyChild(child.props.children);
