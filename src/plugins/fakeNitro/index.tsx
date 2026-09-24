@@ -76,7 +76,11 @@ const mediaSizes = [16, 32, 48, 56, 64, 96, 128, 160, 256, 512, 1024];
 
 function getFakeNitroLinkUrl(node: any, ...patterns: Array<RegExp>) {
     const props = node?.props;
-    const candidates = [node?.target, node?.href, node?.url, props?.href, props?.url, props?.target];
+    // Discord may echo a CDN link as plain text instead of preserving its href/target.
+    const linkText = typeof node === "string" ? node.trim() : typeof props?.children === "string" ? props.children.trim() : undefined;
+    const linkUrl = linkText?.startsWith("<") && linkText.endsWith(">") ? linkText.slice(1, -1) : linkText;
+    const isOnlyUrlText = linkUrl != null && /^https?:\/\/[^\s<>]+$/.test(linkUrl);
+    const candidates = [node?.target, node?.href, node?.url, props?.href, props?.url, props?.target, isOnlyUrlText ? linkUrl : undefined];
     return candidates.find(value => typeof value === "string" && patterns.some(pattern => pattern.test(value)));
 }
 
@@ -560,13 +564,13 @@ export default definePlugin({
                 return count;
             }
 
-            if (typeof node === "string") return node.trim() === "" ? 0 : null;
-            if (typeof node !== "object") return null;
-
             if (getFakeNitroLinkUrl(node, fakeNitroEmojiRegex)) {
                 hasFakeNitroEmoji = true;
                 return 1;
             }
+
+            if (typeof node === "string") return node.trim() === "" ? 0 : null;
+            if (typeof node !== "object") return null;
 
             const { props } = node;
             if (!props) return null;
