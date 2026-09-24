@@ -74,32 +74,8 @@ const fakeNitroGifStickerRegex = /\/attachments\/\d+?\/\d+?\/(\d+?)\.gif/;
 const hyperLinkRegex = /\[.+?\]\((https?:\/\/.+?)\)/;
 const mediaSizes = [16, 32, 48, 56, 64, 96, 128, 160, 256, 512, 1024];
 
-function getFakeNitroLinkUrl(node: any, ...patterns: Array<RegExp>) {
-    const props = node?.props;
-    const candidates = [node?.target, node?.href, node?.url, props?.href, props?.url, props?.target];
-    return candidates.find(value => typeof value === "string" && patterns.some(pattern => pattern.test(value)));
-}
-
-function isEmojiReactNode(node: any) {
-    const props = node?.props;
-    if (!props) return false;
-
-    const { node: emojiNode, emoji } = props;
-    return Boolean((
-        emojiNode && typeof emojiNode === "object"
-        && (emojiNode.type === "emoji" || emojiNode.type === "customEmoji")
-    ) || (
-        emoji && typeof emoji === "object"
-        && (typeof emoji.emojiId === "string" || typeof emoji.surrogate === "string")
-    ) || (
-        typeof props.jumboable === "boolean"
-        && (typeof props.emojiId === "string" || typeof props.emojiName === "string" || typeof props.src === "string")
-    ));
-}
-
 const DEFAULT_EMOJI_SIZE = 48;
 const DEFAULT_STICKER_SIZE = 160;
-const MAX_JUMBO_EMOJIS = 27;
 
 const settings = definePluginSettings({
     enableEmojiBypass: {
@@ -522,7 +498,7 @@ export default definePlugin({
             content[0] || content.shift();
         } else if (typeof firstContent?.props?.children === "string") {
             firstContent.props.children = firstContent.props.children.trimStart();
-            if (!firstContent.props.children && !isEmojiReactNode(firstContent)) content.shift();
+            firstContent.props.children || content.shift();
         }
 
         const lastIndex = content.length - 1;
@@ -532,7 +508,7 @@ export default definePlugin({
             content[lastIndex] || content.pop();
         } else if (typeof lastContent?.props?.children === "string") {
             lastContent.props.children = lastContent.props.children.trimEnd();
-            if (!lastContent.props.children && !isEmojiReactNode(lastContent)) content.pop();
+            lastContent.props.children || content.pop();
         }
     },
 
@@ -544,120 +520,26 @@ export default definePlugin({
         if (!Array.isArray(child.props.children)) child.props.children = [child.props.children];
     },
 
-    getFakeNitroEmojiOnlyCount(content: any): number | null {
-        let hasFakeNitroEmoji = false;
-
-        const countNode = (node: any): number | null => {
-            if (node == null || node === false) return 0;
-
-            if (Array.isArray(node)) {
-                let count = 0;
-                for (const child of node) {
-                    const childCount = countNode(child);
-                    if (childCount == null) return null;
-                    count += childCount;
-                }
-                return count;
-            }
-
-            if (typeof node === "string") return node.trim() === "" ? 0 : null;
-            if (typeof node !== "object") return null;
-
-            if (getFakeNitroLinkUrl(node, fakeNitroEmojiRegex)) {
-                hasFakeNitroEmoji = true;
-                return 1;
-            }
-
-            const { props } = node;
-            if (!props) return null;
-
-            const { node: emojiNode, emoji } = props;
-            if (
-                emojiNode && typeof emojiNode === "object"
-                && (emojiNode.type === "emoji" || emojiNode.type === "customEmoji")
-            ) return 1;
-
-            if (
-                emoji && typeof emoji === "object"
-                && (typeof emoji.emojiId === "string" || typeof emoji.surrogate === "string")
-            ) return 1;
-
-            if (
-                typeof props.jumboable === "boolean"
-                && (typeof props.emojiId === "string" || typeof props.emojiName === "string" || typeof props.src === "string")
-            ) return 1;
-
-            if (props.children != null) return countNode(props.children);
-
-            return null;
-        };
-
-        const count = countNode(content);
-        return hasFakeNitroEmoji && count != null && count > 0 ? count : null;
-    },
-
-    setEmojiJumboable(content: any) {
-        if (Array.isArray(content)) {
-            for (const child of content) this.setEmojiJumboable(child);
-            return;
-        }
-
-        if (!content || typeof content !== "object") return;
-
-        const { props } = content;
-        if (!props) return;
-
-        const { node: emojiNode, emoji } = props;
-        if (
-            emojiNode && typeof emojiNode === "object"
-            && (emojiNode.type === "emoji" || emojiNode.type === "customEmoji")
-        ) emojiNode.jumboable = true;
-
-        if (
-            emoji && typeof emoji === "object"
-            && (typeof emoji.emojiId === "string" || typeof emoji.surrogate === "string")
-        ) emoji.jumboable = true;
-
-        if (
-            "jumboable" in props
-            && (typeof props.emojiId === "string" || typeof props.emojiName === "string" || typeof props.src === "string")
-        ) props.jumboable = true;
-
-        if (props.children != null) this.setEmojiJumboable(props.children);
-    },
-
     patchFakeNitroEmojisOrRemoveStickersLinks(content: Array<any>, inline: boolean) {
-        const emojiOnlyCount = this.getFakeNitroEmojiOnlyCount(content);
-        const isEmojiOnlyWithFakeNitro = emojiOnlyCount != null;
-        const shouldJumbo = !inline && isEmojiOnlyWithFakeNitro && emojiOnlyCount <= MAX_JUMBO_EMOJIS;
-
-        // Compound messages are normally left untouched. Emoji-only messages containing FakeNitro links are
-        // special-cased so they can be transformed and sized the same way Discord sizes real emoji-only messages.
-        if (
-            (content.length > 1 || typeof content[0]?.type === "string")
-            && !settings.store.transformCompoundSentence
-            && !isEmojiOnlyWithFakeNitro
-        ) return content;
+        // If content has more than one child or it's a single ReactElement like a header, list or span
+        if ((content.length > 1 || typeof content[0]?.type === "string") && !settings.store.transformCompoundSentence) return content;
 
         let nextIndex = content.length;
 
-        const transformLinkChild = (child: ReactElement<any>, linkUrl?: string) => {
-            const href = linkUrl ?? getFakeNitroLinkUrl(child, fakeNitroEmojiRegex, fakeNitroStickerRegex, fakeNitroGifStickerRegex) ?? child?.props?.href;
-            if (typeof href !== "string") return child;
-
+        const transformLinkChild = (child: ReactElement<any>) => {
             if (settings.store.transformEmojis) {
-                const fakeNitroMatch = href.match(fakeNitroEmojiRegex);
+                const fakeNitroMatch = child.props.href.match(fakeNitroEmojiRegex);
                 if (fakeNitroMatch) {
                     let url: URL | null = null;
                     try {
-                        url = new URL(href);
+                        url = new URL(child.props.href);
                     } catch { }
 
                     const emojiName = EmojiStore.getCustomEmojiById(fakeNitroMatch[1])?.name ?? url?.searchParams.get("name") ?? "FakeNitroEmoji";
                     const isAnimated = fakeNitroMatch[2] === "gif" || url?.searchParams.get("animated") === "true";
 
                     return Parser.defaultRules.customEmoji.react({
-                        jumboable: shouldJumbo,
+                        jumboable: !inline && content.length === 1 && typeof content[0].type !== "string",
                         animated: isAnimated,
                         emojiId: fakeNitroMatch[1],
                         name: emojiName,
@@ -667,9 +549,9 @@ export default definePlugin({
             }
 
             if (settings.store.transformStickers) {
-                if (fakeNitroStickerRegex.test(href)) return null;
+                if (fakeNitroStickerRegex.test(child.props.href)) return null;
 
-                const gifMatch = href.match(fakeNitroGifStickerRegex);
+                const gifMatch = child.props.href.match(fakeNitroGifStickerRegex);
                 if (gifMatch) {
                     // There is no way to differentiate a regular gif attachment from a fake nitro animated sticker, so we check if the StickersStore contains the id of the fake sticker
                     if (StickersStore.getStickerById(gifMatch[1])) return null;
@@ -681,18 +563,6 @@ export default definePlugin({
 
         const transformChild = (child: ReactElement<any>) => {
             if (child?.props?.trusted != null) return transformLinkChild(child);
-
-            // Discord may mark a CDN link as untrusted after the server echoes the sent message.
-            // Still transform known FakeNitro URLs so the accompanying image embed can be hidden safely.
-            const href = getFakeNitroLinkUrl(child, fakeNitroEmojiRegex, fakeNitroStickerRegex, fakeNitroGifStickerRegex);
-            if (
-                typeof href === "string"
-                && (
-                    settings.store.transformEmojis && fakeNitroEmojiRegex.test(href)
-                    || settings.store.transformStickers && (fakeNitroStickerRegex.test(href) || fakeNitroGifStickerRegex.test(href))
-                )
-            ) return transformLinkChild(child);
-
             if (child?.props?.children != null) {
                 if (!Array.isArray(child.props.children)) {
                     child.props.children = modifyChild(child.props.children);
@@ -745,8 +615,6 @@ export default definePlugin({
         try {
             const newContent = modifyChildren(lodash.cloneDeep(content));
             this.trimContent(newContent);
-
-            if (shouldJumbo) this.setEmojiJumboable(newContent);
 
             return newContent;
         } catch (err) {
@@ -855,7 +723,7 @@ export default definePlugin({
     },
 
     shouldKeepEmojiLink(link: any) {
-        return getFakeNitroLinkUrl(link, fakeNitroEmojiRegex) != null;
+        return link.target && fakeNitroEmojiRegex.test(link.target);
     },
 
     addFakeNotice(type: FakeNoticeType, node: Array<ReactNode>, fake: boolean) {
@@ -1024,10 +892,13 @@ export default definePlugin({
             }
 
             if (s.enableEmojiBypass) {
-                for (const emoji of messageObj.validNonShortcutEmojis ?? []) {
+                for (const emoji of messageObj.validNonShortcutEmojis) {
                     if (this.canUseEmote(emoji, channelId)) continue;
 
+                    hasBypass = true;
+
                     const emojiSize = s.emojiSize ?? DEFAULT_EMOJI_SIZE;
+                    const emojiString = `<${emoji.animated ? "a" : ""}:${emoji.originalName || emoji.name}:${emoji.id}>`;
 
                     const url = new URL(IconUtils.getEmojiURL({ id: emoji.id, animated: emoji.animated, size: emojiSize }));
                     url.searchParams.set("size", emojiSize.toString());
@@ -1036,18 +907,9 @@ export default definePlugin({
 
                     const linkText = s.hyperLinkText.replaceAll("{{NAME}}", emoji.name);
 
-                    const emojiTagRegex = /(?<!\\)<a?:[^:\s]+:(\d+)>/g;
-                    let replacedEmoji = false;
-
-                    messageObj.content = messageObj.content.replace(emojiTagRegex, (match, emojiId, offset, origStr) => {
-                        if (emojiId !== String(emoji.id)) return match;
-
-                        replacedEmoji = true;
+                    messageObj.content = messageObj.content.replace(emojiString, (match, offset, origStr) => {
                         return `${getWordBoundary(origStr, offset - 1)}${s.useHyperLinks ? `[${linkText}](${url})` : url}${getWordBoundary(origStr, offset + match.length)}`;
                     });
-
-                    if (!replacedEmoji) continue;
-                    hasBypass = true;
                 }
             }
 
