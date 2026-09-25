@@ -26,7 +26,7 @@ import definePlugin, { OptionType } from "@utils/types";
 import type { Emoji, Message, RenderModalProps, Sticker } from "@vencord/discord-types";
 import { StickerFormatType } from "@vencord/discord-types/enums";
 import { findByCodeLazy, findByPropsLazy, proxyLazyWebpack } from "@webpack";
-import { ChannelStore, ConfirmModal, DraftType, EmojiStore, FluxDispatcher, Forms, GuildMemberStore, IconUtils, lodash, openModal, Parser, PermissionsBits, PermissionStore, StickersStore, UploadHandler, UserSettingsActionCreators, UserSettingsProtoStore, UserStore } from "@webpack/common";
+import { ChannelStore, ConfirmModal, DraftType, EmojiStore, FluxDispatcher, Forms, GuildMemberStore, IconUtils, openModal, PermissionsBits, PermissionStore, StickersStore, UploadHandler, UserSettingsActionCreators, UserSettingsProtoStore, UserStore } from "@webpack/common";
 import { applyPalette, GIFEncoder, quantize } from "gifenc";
 import type { ReactElement, ReactNode } from "react";
 
@@ -39,6 +39,8 @@ function searchProtoClassField(localName: string, protoClass: any) {
     const fieldGetter = Object.values(field).find(value => typeof value === "function") as any;
     return fieldGetter?.();
 }
+
+const logger = new Logger("FakeNitro");
 
 const PreloadedUserSettingsActionCreators = proxyLazyWebpack(() => UserSettingsActionCreators.PreloadedUserSettingsActionCreators);
 const AppearanceSettingsActionCreators = proxyLazyWebpack(() => searchProtoClassField("appearance", PreloadedUserSettingsActionCreators.ProtoClass));
@@ -329,20 +331,11 @@ export default definePlugin({
         },
         {
             find: '["strong","em","u","text","inlineCode","s","spoiler"]',
-            replacement: [
-                {
-                    // Call our function to decide whether the emoji link should be kept or not
-                    predicate: () => settings.store.transformEmojis,
-                    match: /(\i)=\(0,\i\.\i\)\((\i)\)(?=&&)(?<=\i=\1,\2=\(\i\?\?\i\)\.embeds.{0,50}?)/,
-                    replace: (m, content, _embeds) => `${m} && !$self.shouldKeepEmojiLink(${content}[0])`
-                },
-                {
-                    // Patch the rendered message content to add fake nitro emojis or remove sticker links
-                    predicate: () => settings.store.transformEmojis || settings.store.transformStickers,
-                    match: /(?=return{hasSpoilerEmbeds:\i,hasBailedAst:\i,content:(\i))/,
-                    replace: (_, content) => `${content}=$self.patchFakeNitroEmojisOrRemoveStickersLinks(${content},arguments[2]?.formatInline);`
-                }
-            ]
+            predicate: () => settings.store.transformEmojis || settings.store.transformStickers,
+            replacement: {
+                match: /\(\{ast:(\i)(?=,inline:\i)/,
+                replace: "({ast:$self.transformAst($1)"
+            }
         },
         {
             find: "}renderStickersAccessories(",
@@ -521,200 +514,112 @@ export default definePlugin({
         if (!Array.isArray(child.props.children)) child.props.children = [child.props.children];
     },
 
-    getFakeNitroEmojiOnlyCount(content: any): number | null {
-        let hasFakeNitroEmoji = false;
+    transformAst(ast: any[]) {
+        try {
+            const isFakeNitroEmojiLink = (node: any) =>
+                node?.type === "link"
+                && typeof node.target === "string"
+                && fakeNitroEmojiRegex.test(node.target);
 
-        const countNode = (node: any): number | null => {
-            if (node == null || node === false) return 0;
+            let hasFakeNitroEmoji = false;
+            let emojiOnlyCount = 0;
+            let isEmojiOnly = ast.length > 0;
 
-            if (Array.isArray(node)) {
-                let count = 0;
-                for (const child of node) {
-                    const childCount = countNode(child);
-                    if (childCount == null) return null;
-                    count += childCount;
+            for (const node of ast) {
+                if (node?.type === "emoji" || node?.type === "customEmoji") {
+                    emojiOnlyCount++;
+                    continue;
                 }
-                return count;
+
+                if (isFakeNitroEmojiLink(node)) {
+                    hasFakeNitroEmoji = true;
+                    emojiOnlyCount++;
+                    continue;
+                }
+
+                if (node?.type === "text") {
+                    const text = typeof node.content === "string"
+                        ? node.content
+                        : typeof node.text === "string"
+                            ? node.text
+                            : typeof node.value === "string"
+                                ? node.value
+                                : null;
+
+                    if (text != null && text.trim() === "") continue;
+                }
+
+                isEmojiOnly = false;
+                break;
             }
 
-            if (typeof node === "string") return node.trim() === "" ? 0 : null;
-            if (typeof node !== "object") return null;
+            const isEmojiOnlyWithFakeNitro = isEmojiOnly && hasFakeNitroEmoji && emojiOnlyCount > 0;
+            const shouldJumbo = isEmojiOnlyWithFakeNitro && emojiOnlyCount <= MAX_JUMBO_EMOJIS;
 
-            const { props } = node;
-            if (!props) return null;
-
-            if (typeof props.href === "string" && fakeNitroEmojiRegex.test(props.href)) {
-                hasFakeNitroEmoji = true;
-                return 1;
+            // Compound messages are normally left untouched. Emoji-only messages containing FakeNitro
+            // links are special-cased so they render with the same jumbo sizing as real emoji-only messages.
+            if (!settings.store.transformCompoundSentence && ast.length > 1 && !isEmojiOnlyWithFakeNitro) {
+                return ast;
             }
 
-            const { node: emojiNode, emoji } = props;
-            if (
-                emojiNode && typeof emojiNode === "object"
-                && (emojiNode.type === "emoji" || emojiNode.type === "customEmoji")
-            ) return 1;
+            // Filter out sticker links. These are transformed into actual stickers later, so we don't want duplicate links
+            if (settings.store.transformStickers) {
+                ast = ast.filter(node => {
+                    const { type, target } = node;
 
-            if (
-                emoji && typeof emoji === "object"
-                && (typeof emoji.emojiId === "string" || typeof emoji.surrogate === "string")
-            ) return 1;
+                    if (type !== "link") return true;
+                    if (fakeNitroStickerRegex.test(target)) return false;
 
-            if (
-                typeof props.jumboable === "boolean"
-                && (typeof props.emojiId === "string" || typeof props.emojiName === "string" || typeof props.src === "string")
-            ) return 1;
+                    const gifStickerLinkMatch = target.match(fakeNitroGifStickerRegex);
+                    const isGifStickerLink = gifStickerLinkMatch && StickersStore.getStickerById(gifStickerLinkMatch[1]);
 
-            if (props.children != null) return countNode(props.children);
+                    return !isGifStickerLink;
+                });
+            }
 
-            return null;
-        };
-
-        const count = countNode(content);
-        return hasFakeNitroEmoji && count != null && count > 0 ? count : null;
-    },
-
-    setEmojiJumboable(content: any) {
-        if (Array.isArray(content)) {
-            for (const child of content) this.setEmojiJumboable(child);
-            return;
-        }
-
-        if (!content || typeof content !== "object") return;
-
-        const { props } = content;
-        if (!props) return;
-
-        const { node: emojiNode, emoji } = props;
-        if (
-            emojiNode && typeof emojiNode === "object"
-            && (emojiNode.type === "emoji" || emojiNode.type === "customEmoji")
-        ) emojiNode.jumboable = true;
-
-        if (
-            emoji && typeof emoji === "object"
-            && (typeof emoji.emojiId === "string" || typeof emoji.surrogate === "string")
-        ) emoji.jumboable = true;
-
-        if (
-            "jumboable" in props
-            && (typeof props.emojiId === "string" || typeof props.emojiName === "string" || typeof props.src === "string")
-        ) props.jumboable = true;
-
-        if (props.children != null) this.setEmojiJumboable(props.children);
-    },
-
-    patchFakeNitroEmojisOrRemoveStickersLinks(content: Array<any>, inline: boolean) {
-        const emojiOnlyCount = this.getFakeNitroEmojiOnlyCount(content);
-        const isEmojiOnlyWithFakeNitro = emojiOnlyCount != null;
-        const shouldJumbo = !inline && isEmojiOnlyWithFakeNitro && emojiOnlyCount <= MAX_JUMBO_EMOJIS;
-
-        // Compound messages are normally left untouched. Emoji-only messages containing FakeNitro links are
-        // special-cased so they can be transformed and sized the same way Discord sizes real emoji-only messages.
-        if (
-            (content.length > 1 || typeof content[0]?.type === "string")
-            && !settings.store.transformCompoundSentence
-            && !isEmojiOnlyWithFakeNitro
-        ) return content;
-
-        let nextIndex = content.length;
-
-        const transformLinkChild = (child: ReactElement<any>) => {
             if (settings.store.transformEmojis) {
-                const fakeNitroMatch = child.props.href.match(fakeNitroEmojiRegex);
-                if (fakeNitroMatch) {
+                ast = ast.map(node => {
+                    const { type, target } = node;
+
+                    if (type !== "link") return node;
+
+                    const fakeNitroMatch = target.match(fakeNitroEmojiRegex);
+                    if (!fakeNitroMatch) return node;
+
                     let url: URL | null = null;
                     try {
-                        url = new URL(child.props.href);
+                        url = new URL(target);
                     } catch { }
 
-                    const emojiName = EmojiStore.getCustomEmojiById(fakeNitroMatch[1])?.name ?? url?.searchParams.get("name") ?? "FakeNitroEmoji";
-                    const isAnimated = fakeNitroMatch[2] === "gif" || url?.searchParams.get("animated") === "true";
+                    const emojiId = fakeNitroMatch[1];
+                    const emojiName = EmojiStore.getCustomEmojiById(emojiId)?.name ?? url?.searchParams.get("name") ?? "FakeNitroEmoji";
+                    const animated = fakeNitroMatch[2] === "gif" || url?.searchParams.get("animated") === "true";
 
-                    return Parser.defaultRules.customEmoji.react({
+                    return {
+                        animated,
+                        emojiId,
                         jumboable: shouldJumbo,
-                        animated: isAnimated,
-                        emojiId: fakeNitroMatch[1],
-                        name: emojiName,
+                        name: `:${emojiName}:`,
+                        type: "customEmoji",
                         fake: true
-                    }, void 0, { key: String(nextIndex++) });
-                }
+                    };
+                });
             }
 
-            if (settings.store.transformStickers) {
-                if (fakeNitroStickerRegex.test(child.props.href)) return null;
+            if (shouldJumbo) {
+                ast = ast.map(node => {
+                    if (node?.type !== "emoji" && node?.type !== "customEmoji") return node;
 
-                const gifMatch = child.props.href.match(fakeNitroGifStickerRegex);
-                if (gifMatch) {
-                    // There is no way to differentiate a regular gif attachment from a fake nitro animated sticker, so we check if the StickersStore contains the id of the fake sticker
-                    if (StickersStore.getStickerById(gifMatch[1])) return null;
-                }
+                    return node?.emoji && typeof node.emoji === "object"
+                        ? { ...node, jumboable: true, emoji: { ...node.emoji, jumboable: true } }
+                        : { ...node, jumboable: true };
+                });
             }
-
-            return child;
-        };
-
-        const transformChild = (child: ReactElement<any>) => {
-            if (child?.props?.trusted != null) return transformLinkChild(child);
-            if (child?.props?.children != null) {
-                if (!Array.isArray(child.props.children)) {
-                    child.props.children = modifyChild(child.props.children);
-                    return child;
-                }
-
-                child.props.children = modifyChildren(child.props.children);
-                if (child.props.children.length === 0) return null;
-                return child;
-            }
-
-            return child;
-        };
-
-        const modifyChild = (child: ReactElement<any>) => {
-            const newChild = transformChild(child);
-
-            if (newChild?.type === "ul" || newChild?.type === "ol") {
-                this.ensureChildrenIsArray(newChild);
-                if (newChild.props.children.length === 0) return null;
-
-                let listHasAnItem = false;
-                for (const [index, child] of newChild.props.children.entries()) {
-                    if (child == null) {
-                        delete newChild.props.children[index];
-                        continue;
-                    }
-
-                    this.ensureChildrenIsArray(child);
-                    if (child.props.children.length > 0) listHasAnItem = true;
-                    else delete newChild.props.children[index];
-                }
-
-                if (!listHasAnItem) return null;
-
-                newChild.props.children = this.clearEmptyArrayItems(newChild.props.children);
-            }
-
-            return newChild;
-        };
-
-        const modifyChildren = (children: Array<ReactElement<any>>) => {
-            for (const [index, child] of children.entries()) children[index] = modifyChild(child);
-
-            children = this.clearEmptyArrayItems(children);
-
-            return children;
-        };
-
-        try {
-            const newContent = modifyChildren(lodash.cloneDeep(content));
-            this.trimContent(newContent);
-
-            if (shouldJumbo) this.setEmojiJumboable(newContent);
-
-            return newContent;
-        } catch (err) {
-            new Logger("FakeNitro").error(err);
-            return content;
+        } catch (e) {
+            logger.error("Error transforming AST:", e);
         }
+
+        return ast;
     },
 
     patchFakeNitroStickers(stickers: Array<any>, message: Message) {
@@ -814,10 +719,6 @@ export default definePlugin({
 
             return true;
         });
-    },
-
-    shouldKeepEmojiLink(link: any) {
-        return link.target && fakeNitroEmojiRegex.test(link.target);
     },
 
     addFakeNotice(type: FakeNoticeType, node: Array<ReactNode>, fake: boolean) {
