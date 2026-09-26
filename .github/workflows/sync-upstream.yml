@@ -1,0 +1,77 @@
+name: Sync upstream
+
+on:
+    schedule:
+        - cron: "17 9 * * *"
+    workflow_dispatch:
+
+permissions:
+    contents: write
+
+concurrency:
+    group: sync-upstream
+    cancel-in-progress: false
+
+jobs:
+    sync:
+        if: github.repository == 'marcmy/Vencord'
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Check out custom branch
+              uses: actions/checkout@v7
+              with:
+                  ref: custom-plugins
+                  fetch-depth: 0
+
+            - name: Fetch upstream
+              run: |
+                  git remote add upstream https://github.com/Vendicated/Vencord.git
+                  git fetch --prune upstream main
+
+            - name: Check for upstream changes
+              id: upstream
+              shell: bash
+              run: |
+                  if git merge-base --is-ancestor upstream/main HEAD; then
+                      echo "changed=false" >> "$GITHUB_OUTPUT"
+                      echo "custom-plugins already contains upstream/main."
+                  else
+                      echo "changed=true" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Merge upstream/main
+              if: steps.upstream.outputs.changed == 'true'
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git merge --no-edit upstream/main
+
+            - name: Set up pnpm
+              if: steps.upstream.outputs.changed == 'true'
+              uses: pnpm/action-setup@v6
+
+            - name: Use Node.js 24
+              if: steps.upstream.outputs.changed == 'true'
+              uses: actions/setup-node@v7
+              with:
+                  node-version: 24
+                  cache: "pnpm"
+
+            - name: Install dependencies
+              if: steps.upstream.outputs.changed == 'true'
+              run: pnpm install --frozen-lockfile
+
+            - name: Validate merged branch
+              if: steps.upstream.outputs.changed == 'true'
+              run: |
+                  pnpm buildStandalone
+                  pnpm testTsc
+                  pnpm lint
+                  pnpm lint-styles
+                  pnpm buildWeb
+                  pnpm generatePluginJson
+
+            - name: Push sync
+              if: steps.upstream.outputs.changed == 'true'
+              run: git push origin HEAD:custom-plugins
