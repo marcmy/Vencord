@@ -42,10 +42,26 @@ jobs:
 
             - name: Merge upstream/main
               if: steps.upstream.outputs.changed == 'true'
+              shell: bash
               run: |
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-                  git merge --no-edit upstream/main
+
+                  if git merge --no-edit upstream/main; then
+                      exit 0
+                  fi
+
+                  mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+                  if [[ ${#conflicts[@]} -eq 1 && "${conflicts[0]}" == ".github/pull_request_template.md" ]]; then
+                      echo "Resolving fork-specific PR template conflict with custom-plugins version."
+                      git checkout --ours -- .github/pull_request_template.md
+                      git add .github/pull_request_template.md
+                      git commit --no-edit
+                  else
+                      echo "Automatic merge failed with unexpected conflicts:"
+                      printf ' - %s\n' "${conflicts[@]}"
+                      exit 1
+                  fi
 
             - name: Set up pnpm
               if: steps.upstream.outputs.changed == 'true'
