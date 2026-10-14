@@ -38,6 +38,7 @@ jobs:
                       echo "custom-plugins already contains upstream/main."
                   else
                       echo "changed=true" >> "$GITHUB_OUTPUT"
+                      echo "base_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
                   fi
 
             - name: Merge upstream/main
@@ -88,6 +89,22 @@ jobs:
                   pnpm buildWeb
                   pnpm generatePluginJson
 
+            - name: Guard customized plugins against upstream deletion
+              if: steps.upstream.outputs.changed == 'true'
+              shell: bash
+              env:
+                  BASE_SHA: ${{ steps.upstream.outputs.base_sha }}
+              run: |
+                  set -euo pipefail
+                  for file in src/plugins/splitLargeMessages/index.ts src/plugins/showHiddenChannels/index.tsx; do
+                      test -f "$file" || { echo "::error::Missing fork-critical plugin: $file"; exit 1; }
+                  done
+                  deleted="$(git diff --name-only --diff-filter=D "$BASE_SHA" HEAD -- src/plugins/splitLargeMessages src/plugins/showHiddenChannels)"
+                  if [[ -n "$deleted" ]]; then
+                      echo "::error::Upstream sync removed customized plugin files:"
+                      printf '%s\n' "$deleted"
+                      exit 1
+                  fi
             - name: Push sync
               if: steps.upstream.outputs.changed == 'true'
               run: git push origin HEAD:custom-plugins
