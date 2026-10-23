@@ -101,7 +101,7 @@ async function copyCleanSelection() {
     try {
         // This follows the same browser copy path as Ctrl+C, which Discord already handles better.
         if (document.execCommand("copy")) {
-            showToast("Copied selection", "success");
+            showToast({ text: "Copied selection", variant: "success" });
             return;
         }
     } catch { }
