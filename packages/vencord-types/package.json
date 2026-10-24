@@ -22,7 +22,7 @@
         "@vencord/discord-types": "workspace:^",
         "moment": "^2.31.0",
         "ts-pattern": "^5.9.2",
-        "type-fest": "^5.7.0"
+        "type-fest": "^5.10.0"
     },
     "peerDependencies": {
         "@types/react": "18.3.1",
