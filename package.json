@@ -50,7 +50,7 @@
         "@types/lodash": "^4.17.24",
         "@types/node": "^26.2.0",
         "@types/react": "19.1.0",
-        "@types/react-dom": "19.1.0",
+        "@types/react-dom": "19.1.11",
         "@types/yazl": "^3.3.1",
         "@vencord/discord-types": "link:packages/discord-types",
         "diff": "^9.0.0",
