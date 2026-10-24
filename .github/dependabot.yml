@@ -3,12 +3,11 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "thursday"
-      time: "18:00"
+      interval: "daily"
+      time: "12:00"
       timezone: "America/New_York"
-    # Let upstream own routine npm version churn. Security updates remain enabled.
-    open-pull-requests-limit: 0
+    # Routine npm updates are enabled; preserve the ts-patch major-version exclusion.
+    open-pull-requests-limit: 10
     ignore:
       # ts-patch 4.x requires Node >=22.15.0, while Vencord currently supports Node >=22.
       # Keep major 4 deferred until the project intentionally raises its Node floor.
@@ -18,7 +17,7 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
+      interval: "daily"
+      time: "12:00"
       timezone: "America/New_York"
+    open-pull-requests-limit: 10
