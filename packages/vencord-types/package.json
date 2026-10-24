@@ -21,7 +21,7 @@
         "@types/node": "^26.2.0",
         "@vencord/discord-types": "workspace:^",
         "moment": "^2.31.0",
-        "ts-pattern": "^5.9.0",
+        "ts-pattern": "^5.9.2",
         "type-fest": "^5.7.0"
     },
     "peerDependencies": {
