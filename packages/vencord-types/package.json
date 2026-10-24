@@ -18,7 +18,7 @@
     },
     "dependencies": {
         "@types/lodash": "4.17.19",
-        "@types/node": "^26.2.0",
+        "@types/node": "^26.6.5",
         "@vencord/discord-types": "workspace:^",
         "moment": "^2.31.0",
         "ts-pattern": "^5.9.2",
