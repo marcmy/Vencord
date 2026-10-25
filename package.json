@@ -47,7 +47,7 @@
     "devDependencies": {
         "@stylistic/eslint-plugin": "^5.10.0",
         "@types/chrome": "^0.3.6",
-        "@types/lodash": "^4.17.24",
+        "@types/lodash": "^4.17.27",
         "@types/node": "^26.6.5",
         "@types/react": "19.1.0",
         "@types/react-dom": "19.1.11",
