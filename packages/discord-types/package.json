@@ -17,6 +17,6 @@
         "type-fest": "^5.10.0"
     },
     "peerDependencies": {
-        "@types/react": "19.1.0"
+        "@types/react": "^19.1.0"
     }
 }
