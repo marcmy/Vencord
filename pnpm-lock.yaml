@@ -132,8 +132,8 @@ importers:
         specifier: ^5.9.2
         version: 5.9.2
       tsx:
-        specifier: ^4.23.8
-        version: 4.23.11
+        specifier: ^4.23.15
+        version: 4.23.15
       type-fest:
         specifier: ^5.10.0
         version: 5.10.0
@@ -193,8 +193,8 @@ importers:
         specifier: ^11.4.1
         version: 11.4.1
       tsx:
-        specifier: ^4.23.8
-        version: 4.23.11
+        specifier: ^4.23.15
+        version: 4.23.15
 
 packages:
 
@@ -2156,8 +2156,8 @@ packages:
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
-  tsx@4.23.11:
-    resolution: {integrity: sha512-Ry2oTEUnhBdeEdWIztY8kf3/nBGnPnjMLVGL0YfdRXMORuPER5NlKmayqxtxRxwB1xBN+RivRaJfe7PM1rtiyw==}
+  tsx@4.23.15:
+    resolution: {integrity: sha512-Yiex1Ovn8z2xPpOWckIiysV1SSyRMY9BkLF++q0yKiDxCqRhosKfMg3janKkiLBwZ5c/YryloKwGZcrEmtwxKw==}
     engines: {node: '>=18.0.0'}
     hasBin: true
 
@@ -4580,7 +4580,7 @@ snapshots:
 
   tslib@2.8.1: {}
 
-  tsx@4.23.11:
+  tsx@4.23.15:
     dependencies:
       esbuild: 0.28.2
     optionalDependencies:
