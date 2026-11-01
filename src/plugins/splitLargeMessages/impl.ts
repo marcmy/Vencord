@@ -6,10 +6,11 @@
 
 import { _handlePreSend, MessageObject, MessageOptions, SendMessageProps } from "@api/MessageEvents";
 import { definePluginSettings } from "@api/Settings";
+import { Paragraph } from "@components/Paragraph";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 import { filters, findAll, findByPropsLazy, moduleListeners } from "@webpack";
-import { ChannelStore, DraftStore, DraftType, EmojiStore, FluxDispatcher, Forms, MessageActions, Modal, openModal, React, SelectedChannelStore, UploadAttachmentStore, UploadHandler, UploadManager, useState } from "@webpack/common";
+import { ChannelStore, DraftStore, DraftType, EmojiStore, FluxDispatcher, MessageActions, Modal, openModal, React, SelectedChannelStore, UploadAttachmentStore, UploadHandler, UploadManager, useState } from "@webpack/common";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const LEADING_GUARD = "\u200b";
@@ -92,14 +93,14 @@ function patchUploadTarget(plugin: any, target: Record<string, any>) {
         if (file?.text) {
             void file.text().then((text: string) => {
                 const content = normalizeLineEndings(text);
-                if (content.length > MAX_MESSAGE_LENGTH && plugin.openLongMessageEditor(channelId, content)) return;
+                if (content.length> MAX_MESSAGE_LENGTH && plugin.openLongMessageEditor(channelId, content)) return;
                 original(files, channel, draftType);
             }).catch(() => original(files, channel, draftType));
             return;
         }
 
         const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
-        if (draft.length > MAX_MESSAGE_LENGTH) {
+        if (draft.length> MAX_MESSAGE_LENGTH) {
             plugin.openLongMessageEditor(channelId, draft);
             return;
         }
@@ -123,13 +124,13 @@ function normalizeLineEndings(text: string) {
 
 function findSplitIndex(text: string) {
     const doubleNewline = text.lastIndexOf("\n\n");
-    if (doubleNewline > -1) return { index: doubleNewline, separatorKind: "double_newline" as const };
+    if (doubleNewline> -1) return { index: doubleNewline, separatorKind: "double_newline" as const };
 
     const singleNewline = text.lastIndexOf("\n");
-    if (singleNewline > -1) return { index: singleNewline, separatorKind: "single_newline" as const };
+    if (singleNewline> -1) return { index: singleNewline, separatorKind: "single_newline" as const };
 
     const space = text.lastIndexOf(" ");
-    if (space > -1) return { index: space, separatorKind: "space" as const };
+    if (space> -1) return { index: space, separatorKind: "space" as const };
 
     return { index: text.length, separatorKind: "none" as const };
 }
@@ -138,7 +139,7 @@ function getLeadingGuardInfo(text: string) {
     let extra = 0;
     const leadingNewlines = text.match(/^\n+/)?.[0].length ?? 0;
     const needsPrefixIndentGuard = leadingNewlines === 0 && /^[\t ]/.test(text);
-    const needsIndentGuardAfterNewlines = leadingNewlines > 0 && /^[\n]+[\t ]/.test(text);
+    const needsIndentGuardAfterNewlines = leadingNewlines> 0 && /^[\n]+[\t ]/.test(text);
     const leadingBlankLineMode = settings.store.leadingBlankLineMode ?? "trim";
 
     const leadingBlankLinePrefix =
@@ -154,7 +155,7 @@ function getLeadingGuardInfo(text: string) {
     return {
         extra,
         apply(chunk: string) {
-            if (leadingNewlines > 0) {
+            if (leadingNewlines> 0) {
                 let rest = chunk.slice(leadingNewlines);
                 if (/^[\t ]/.test(rest)) {
                     rest = LEADING_GUARD + rest;
@@ -183,7 +184,7 @@ function splitContent(content: string, maxLen = MAX_MESSAGE_LENGTH) {
     const leadingBlankLineMode = settings.store.leadingBlankLineMode ?? "trim";
     const preserveLeadingBlankLines = leadingBlankLineMode !== "trim";
 
-    while (remaining.length > 0) {
+    while (remaining.length> 0) {
         const guardInfo = getLeadingGuardInfo(remaining);
         const limit = maxLen - guardInfo.extra;
 
@@ -277,10 +278,10 @@ function buildChunkMessage(baseMessage: MessageObject | undefined, content: stri
 }
 
 function getLongMessageContentSync(channelId: string, msg: MessageObject) {
-    if (msg.content.length > MAX_MESSAGE_LENGTH) return msg.content;
+    if (msg.content.length> MAX_MESSAGE_LENGTH) return msg.content;
 
     const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage);
-    if (draft?.length > MAX_MESSAGE_LENGTH) return draft;
+    if (draft?.length> MAX_MESSAGE_LENGTH) return draft;
 
     return msg.content;
 }
@@ -302,10 +303,10 @@ function isAutoTextFile(file: File | undefined) {
 }
 
 async function getLongMessageContent(channelId: string, msg: MessageObject, options: MessageOptions | undefined) {
-    if (msg.content.length > MAX_MESSAGE_LENGTH) return msg.content;
+    if (msg.content.length> MAX_MESSAGE_LENGTH) return msg.content;
 
     const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage);
-    if (draft?.length > MAX_MESSAGE_LENGTH) return draft;
+    if (draft?.length> MAX_MESSAGE_LENGTH) return draft;
 
     const optionUploadText = await readAutoTextUpload(options?.uploads?.find(isAutoTextUpload));
     if (optionUploadText) return optionUploadText;
@@ -335,7 +336,7 @@ async function readAutoTextUpload(upload: any) {
 
     try {
         const text = normalizeLineEndings(await file.text());
-        return text.length > MAX_MESSAGE_LENGTH ? text : "";
+        return text.length> MAX_MESSAGE_LENGTH ? text : "";
     } catch {
         return "";
     }
@@ -423,12 +424,12 @@ function isChatInputTarget(target: EventTarget | null) {
 
 function getDraftContent(channelId: string, target?: EventTarget | null) {
     let content = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
-    if (content.length > MAX_MESSAGE_LENGTH) return content;
+    if (content.length> MAX_MESSAGE_LENGTH) return content;
 
     const el = getTargetElement(target ?? null) ?? (document.activeElement as HTMLElement | null);
     if (el?.isContentEditable) {
         const text = el.innerText ?? el.textContent ?? "";
-        if (text.length > content.length) content = text;
+        if (text.length> content.length) content = text;
     }
 
     return content;
@@ -458,7 +459,7 @@ function LongMessageEditorModal({
             size: "lg",
             actions: [
                 {
-                    text: chunkCount > 1 ? `Send ${chunkCount} Messages` : "Send Message",
+                    text: chunkCount> 1 ? `Send ${chunkCount} Messages` : "Send Message",
                     variant: "primary",
                     disabled: trimmedLength === 0,
                     onClick: () => {
@@ -474,7 +475,7 @@ function LongMessageEditorModal({
             ]
         },
         React.createElement(
-            Forms.FormText,
+            Paragraph,
             { style: { marginBottom: 8 } },
             `${text.length.toLocaleString()} characters, ${chunkCount.toLocaleString()} message${chunkCount === 1 ? "" : "s"}`
         ),
@@ -569,9 +570,9 @@ export default definePlugin({
         if (MessageActions?.sendMessage) {
             this.originalSendMessage = MessageActions.sendMessage.bind(MessageActions);
             MessageActions.sendMessage = (channelId, msg, waitForChannelReady, options) => {
-                if (msg?.content?.length > MAX_MESSAGE_LENGTH) {
+                if (msg?.content?.length> MAX_MESSAGE_LENGTH) {
                     const chunks = splitContent(msg.content, MAX_MESSAGE_LENGTH);
-                    if (chunks.length > 1) {
+                    if (chunks.length> 1) {
                         return sendChunksSequentially(channelId, chunks, msg, options);
                     }
                 }
@@ -758,8 +759,8 @@ export default definePlugin({
 
                 const isLikelyUploadFrame =
                     hasHiddenDescendant &&
-                    rect.width >= 140 && rect.width <= 700 &&
-                    rect.height >= 80 && rect.height <= 420 &&
+                    rect.width>= 140 && rect.width <= 700 &&
+                    rect.height>= 80 && rect.height <= 420 &&
                     !parent.querySelector("textarea,[role='textbox'],[contenteditable='true']");
 
                 if (isLikelyUploadFrame && (containsOnlyComposerRowText || nonHiddenChildren.length <= 1)) {
@@ -849,7 +850,7 @@ export default definePlugin({
 
         const composerRoot = this.findComposerRoot() ?? document;
         const draft = DraftStore.getDraft(channelId, DraftType.ChannelMessage) ?? "";
-        const isLongDraft = draft.length > MAX_MESSAGE_LENGTH;
+        const isLongDraft = draft.length> MAX_MESSAGE_LENGTH;
 
         if (isLongDraft) {
             for (const el of composerRoot.querySelectorAll<HTMLElement>("button, [role='button'], a, div, span")) {
@@ -870,7 +871,7 @@ export default definePlugin({
         const uploads = safeGet(() => UploadAttachmentStore?.getUploads?.(channelId, DraftType.ChannelMessage)) ?? [];
         const hasAutoText = uploads.some(isAutoTextUpload);
         if (!hasAutoText) return;
-        const onlyAutoText = uploads.length > 0 && uploads.every(isAutoTextUpload);
+        const onlyAutoText = uploads.length> 0 && uploads.every(isAutoTextUpload);
 
         if (onlyAutoText) {
             if (this.openEditorFromLiveAutoUpload(channelId)) {

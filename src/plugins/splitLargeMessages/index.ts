@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { Paragraph } from "@components/Paragraph";
 import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
-import { ChannelStore, DraftType, Forms, Modal, openModal, React, SelectedChannelStore, UploadAttachmentStore, UploadHandler, UploadManager, useState } from "@webpack/common";
+import { ChannelStore, DraftType, Modal, openModal, React, SelectedChannelStore, UploadAttachmentStore, UploadHandler, UploadManager, useState } from "@webpack/common";
 
 import basePlugin from "./impl";
 
@@ -57,13 +58,13 @@ function getLeadingBlankLineMode() {
 
 function findSplitIndex(text: string) {
     const doubleNewline = text.lastIndexOf("\n\n");
-    if (doubleNewline > -1) return { index: doubleNewline, separatorKind: "double_newline" as const };
+    if (doubleNewline> -1) return { index: doubleNewline, separatorKind: "double_newline" as const };
 
     const singleNewline = text.lastIndexOf("\n");
-    if (singleNewline > -1) return { index: singleNewline, separatorKind: "single_newline" as const };
+    if (singleNewline> -1) return { index: singleNewline, separatorKind: "single_newline" as const };
 
     const space = text.lastIndexOf(" ");
-    if (space > -1) return { index: space, separatorKind: "space" as const };
+    if (space> -1) return { index: space, separatorKind: "space" as const };
 
     return { index: text.length, separatorKind: "none" as const };
 }
@@ -72,7 +73,7 @@ function getLeadingGuardExtra(text: string) {
     let extra = 0;
     const leadingNewlines = text.match(/^\n+/)?.[0].length ?? 0;
     const needsPrefixIndentGuard = leadingNewlines === 0 && /^[\t ]/.test(text);
-    const needsIndentGuardAfterNewlines = leadingNewlines > 0 && /^[\n]+[\t ]/.test(text);
+    const needsIndentGuardAfterNewlines = leadingNewlines> 0 && /^[\n]+[\t ]/.test(text);
     const leadingBlankLineMode = getLeadingBlankLineMode();
 
     const leadingBlankLinePrefix =
@@ -99,7 +100,7 @@ function countMessageChunks(content: string, maxLen = MAX_MESSAGE_LENGTH) {
     let count = 0;
     const preserveLeadingBlankLines = getLeadingBlankLineMode() !== "trim";
 
-    while (remaining.length > 0) {
+    while (remaining.length> 0) {
         const limit = maxLen - getLeadingGuardExtra(remaining);
         if (remaining.length <= limit) {
             count++;
@@ -172,7 +173,7 @@ function isNativeFileActive(channelId: string) {
         return true;
     }
 
-    if (state.seen || Date.now() >= state.expiresAt) {
+    if (state.seen || Date.now()>= state.expiresAt) {
         nativeFileStates.delete(channelId);
         return false;
     }
@@ -211,7 +212,7 @@ function PasteLargeMessageModal({
     const chunkCount = countMessageChunks(text);
     const trimmedLength = text.trim().length;
 
-    const pasteMessagesLabel = chunkCount > 1
+    const pasteMessagesLabel = chunkCount> 1
         ? `Paste ${chunkCount.toLocaleString()} Messages`
         : "Paste Message";
 
@@ -249,7 +250,7 @@ function PasteLargeMessageModal({
             ]
         },
         React.createElement(
-            Forms.FormText,
+            Paragraph,
             { style: { marginBottom: 8 } },
             `${text.length.toLocaleString()} characters · ${chunkCount.toLocaleString()} message${chunkCount === 1 ? "" : "s"}`
         ),
@@ -368,7 +369,7 @@ export default definePlugin({
                 return;
             }
 
-            if (state.seen || Date.now() >= state.expiresAt) {
+            if (state.seen || Date.now()>= state.expiresAt) {
                 nativeFileStates.delete(channelId);
             }
         }

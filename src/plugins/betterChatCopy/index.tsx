@@ -10,12 +10,13 @@ import { addGlobalContextMenuPatch, findGroupChildrenByChildId, NavContextMenuPa
 import { definePluginSettings } from "@api/Settings";
 import { getUserSettingLazy } from "@api/UserSettings";
 import ErrorBoundary from "@components/ErrorBoundary";
+import { Heading } from "@components/Heading";
 import { Devs } from "@utils/constants";
 import { copyWithToast } from "@utils/discord";
 import { Margins } from "@utils/margins";
 import definePlugin, { OptionType } from "@utils/types";
 import { Channel, Message } from "@vencord/discord-types";
-import { ChannelStore, Constants, Forms, GuildRoleStore, Menu, Modal, openModal, React, RestAPI, Select, showToast, SnowflakeUtils, TextArea, TextInput, UserStore, useState } from "@webpack/common";
+import { ChannelStore, Constants, GuildRoleStore, Menu, Modal, openModal, React, RestAPI, Select, showToast, SnowflakeUtils, TextArea, TextInput, UserStore, useState } from "@webpack/common";
 import type { ReactElement } from "react";
 
 type CopyDirection = "up" | "down";
@@ -243,7 +244,7 @@ async function fetchMessages(channelId: string, anchorId: string, direction: Cop
     let remaining = count;
     const queryKey = direction === "up" ? "before" : "after";
 
-    while (remaining > 0) {
+    while (remaining> 0) {
         const limit = Math.min(100, remaining);
         const res = await RestAPI.get({
             url: Constants.Endpoints.MESSAGES(channelId),
@@ -342,15 +343,15 @@ function CopyMessagesModal({ modalProps, message }: { modalProps: any; message: 
                     onClick: () => copyWithToast(text, "Copied conversation text")
                 }
             ]}
-        >
-            <Forms.FormTitle tag="h5">Messages</Forms.FormTitle>
+>
+            <Heading>Messages</Heading>
             <TextInput
                 value={count}
                 onChange={setCount}
                 placeholder="100"
             />
 
-            <Forms.FormTitle tag="h5" className={Margins.top16}>Direction</Forms.FormTitle>
+            <Heading className={Margins.top16}>Direction</Heading>
             <Select
                 options={[
                     { label: "Up from clicked message", value: "up" },
@@ -362,7 +363,7 @@ function CopyMessagesModal({ modalProps, message }: { modalProps: any; message: 
                 closeOnSelect
             />
 
-            <Forms.FormTitle tag="h5" className={Margins.top16}>Text</Forms.FormTitle>
+            <Heading className={Margins.top16}>Text</Heading>
             <TextArea
                 className="vc-better-chat-copy-textarea"
                 value={text}
@@ -396,7 +397,7 @@ const messageContextMenuPatch: NavContextMenuPatchCallback = (children, { messag
         <Menu.MenuItem
             id="vc-better-chat-copy"
             label="Copy Nearby Messages"
-        >
+>
             <Menu.MenuItem
                 id="vc-better-chat-copy-open"
                 label="Open Copy Window"

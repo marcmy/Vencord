@@ -5,13 +5,15 @@
  */
 
 import { Button } from "@components/Button";
+import { Heading } from "@components/Heading";
 import { MainSettingsIcon } from "@components/Icons";
+import { Paragraph } from "@components/Paragraph";
 import { SettingsTab } from "@components/settings/tabs/BaseTab";
 import SettingsPlugin from "@plugins/_core/settings";
 import { Devs } from "@utils/constants";
 import { removeFromArray } from "@utils/misc";
 import definePlugin from "@utils/types";
-import { Forms, React } from "@webpack/common";
+import { React } from "@webpack/common";
 
 const ENTRY_KEY = "vencord_openasar";
 
@@ -24,10 +26,10 @@ function OpenAsarSettingsPage() {
 
     return (
         <SettingsTab>
-            <Forms.FormTitle tag="h2">OpenAsar</Forms.FormTitle>
-            <Forms.FormText style={{ marginBottom: 16 }}>
+            <Heading>OpenAsar</Heading>
+            <Paragraph style={{ marginBottom: 16 }}>
                 OpenAsar uses a separate settings window. This Vencord entry remains available when OpenAsar's own Discord sidebar injection breaks.
-            </Forms.FormText>
+            </Paragraph>
             <Button onClick={openOpenAsarSettings}>Open OpenAsar Settings</Button>
         </SettingsTab>
     );
