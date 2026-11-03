@@ -54,8 +54,8 @@ importers:
         specifier: ^5.10.0
         version: 5.10.0(eslint@10.13.0(supports-color@10.2.2))
       '@types/chrome':
-        specifier: ^0.3.6
-        version: 0.3.6
+        specifier: ^0.3.7
+        version: 0.3.7
       '@types/lodash':
         specifier: ^4.17.27
         version: 4.17.27
@@ -542,8 +542,8 @@ packages:
     peerDependencies:
       eslint: ^9.0.0 || ^10.0.0
 
-  '@types/chrome@0.3.6':
-    resolution: {integrity: sha512-NXCrCBefCHCKMVbkaxfBQqyP766Wg85S2FQhixCCxq7AtjJwoEaja2y5NSqCzpihIi9mPqhaF5RuybTnrdYD2Q==}
+  '@types/chrome@0.3.7':
+    resolution: {integrity: sha512-jWZgbHqWbTL1a5+PoyN0OJutNyejWgyZ5MdcvKo6iJE1TNRtXR3FxsC4WzNl52yZWPidfWC8NV/VUNZf+OFKcA==}
 
   '@types/esrecurse@4.3.1':
     resolution: {integrity: sha512-xJBAbDifo5hpffDBuHl0Y8ywswbiAp/Wi7Y/GtAgSlZyIABppyurxVueOPE8LUQOxdlgi6Zqce7uoEpqNTeiUw==}
@@ -2535,7 +2535,7 @@ snapshots:
       estraverse: 5.3.0
       picomatch: 4.0.4
 
-  '@types/chrome@0.3.6':
+  '@types/chrome@0.3.7':
     dependencies:
       '@types/har-format': 1.2.16
 
