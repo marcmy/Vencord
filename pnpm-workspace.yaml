@@ -6,7 +6,7 @@ overrides:
   'brace-expansion@>=3.0.0 <3.0.6': 3.0.6
   'brace-expansion@>=4.0.0 <5.0.12': 5.0.12
   'dompurify@<3.4.16': 3.4.16
-  'fast-uri@>=3.0.0 <3.1.7': 3.1.7
+  'fast-uri@>=3.0.0 <3.1.9': 3.1.9
   # Preserve the path-alias plugin's match/list API without snapdragon's vulnerable decoder.
   'eslint-plugin-path-alias>nanomatch': npm:micromatch@4.0.8
   'js-yaml@>=4.0.0 <4.3.2': 4.3.2
