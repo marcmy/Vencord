@@ -7,6 +7,8 @@
 import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 
+import { handleMiniResize, stopMiniPlayer, syncMiniPlayer } from "./miniPlayer";
+
 type DocumentPropertyKey = "hidden" | "webkitHidden" | "visibilityState" | "webkitVisibilityState";
 type EventBinding = {
     target: Document | Window;
@@ -316,6 +318,7 @@ function refreshQuestVideos() {
 
     activeQuestVideos = collectQuestVideos();
     syncTrackedVideos(activeQuestVideos);
+    syncMiniPlayer(activeQuestVideos, isQuestModalCandidate);
 
     const isSpoofing = shouldSpoofFocus();
     if (!wasSpoofing && isSpoofing) {
@@ -356,11 +359,12 @@ function stopObserver() {
 
 export default definePlugin({
     name: "DisableQuestFocusPause",
-    description: "Prevents Discord quests from pausing their video when the window loses focus.",
+    description: "Keeps quest videos playing when unfocused and adds a floating mini-player.",
     authors: [Devs.marcmy],
     requiresRestart: false,
 
     start() {
+        window.addEventListener("resize", handleMiniResize);
         installFocusOverrides();
         installBlockingListeners();
         startObserver();
@@ -368,6 +372,8 @@ export default definePlugin({
     },
 
     stop() {
+        stopMiniPlayer();
+        window.removeEventListener("resize", handleMiniResize);
         stopObserver();
         stopBlockingListeners();
         stopTrackingVideos();
