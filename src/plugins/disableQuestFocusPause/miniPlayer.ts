@@ -57,18 +57,30 @@ function findQuestDialog(video: HTMLVideoElement, isQuestModalCandidate: (root: 
     return null;
 }
 
-// Find the modal overlay by its backdrop sibling. A generic [class*="layer"] check
-// is unsafe: "videoPlayer" contains "layer" and can stop the search too early.
-function findQuestLayer(modal: HTMLElement): HTMLElement | null {
+// Prefer a backdrop sibling, but Discord's modal structure varies between releases.
+// As a fallback, find the nearest full-screen overlay instead of blocking minimization.
+function findQuestLayer(modal: HTMLElement): HTMLElement {
     let current = modal;
-    for (let depth = 0; depth < 20 && current.parentElement && current.parentElement !== document.body; depth++) {
+    let viewportLayer: HTMLElement | null = null;
+
+    for (let depth = 0; depth < 24 && current.parentElement && current.parentElement !== document.body; depth++) {
         const parent = current.parentElement;
         if (Array.from(parent.children).some(sibling => sibling !== current && (
             sibling.matches("[class*='backdrop' i]") || sibling.querySelector("[class*='backdrop' i]")
         ))) return parent;
+
+        const rect = parent.getBoundingClientRect();
+        const position = getComputedStyle(parent).position;
+        if (!viewportLayer && parent.id !== "app-mount" &&
+            (position === "fixed" || position === "absolute") &&
+            rect.width >= window.innerWidth * 0.8 && rect.height >= window.innerHeight * 0.8 &&
+            rect.left <= window.innerWidth * 0.2 && rect.top <= window.innerHeight * 0.2) {
+            viewportLayer = parent;
+        }
         current = parent;
     }
-    return null;
+
+    return viewportLayer ?? modal.parentElement ?? modal;
 }
 
 function clampMiniPosition(player: MiniPlayer) {
@@ -199,10 +211,6 @@ function minimizeQuestModal() {
     if (!player || player.minimized || !player.modal.isConnected) return;
 
     const layer = findQuestLayer(player.modal);
-    if (!layer) {
-        console.warn("[DisableQuestFocusPause] Could not locate quest modal backdrop; leaving the full modal open.");
-        return;
-    }
     const bounds = player.video.getBoundingClientRect();
     player.aspectRatio = player.video.videoWidth && player.video.videoHeight
         ? player.video.videoWidth / player.video.videoHeight
