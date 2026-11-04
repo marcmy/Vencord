@@ -57,30 +57,51 @@ function findQuestDialog(video: HTMLVideoElement, isQuestModalCandidate: (root: 
     return null;
 }
 
-// Prefer a backdrop sibling, but Discord's modal structure varies between releases.
-// As a fallback, find the nearest full-screen overlay instead of blocking minimization.
-function findQuestLayer(modal: HTMLElement): HTMLElement {
-    let current = modal;
-    let viewportLayer: HTMLElement | null = null;
+// Discord can insert the backdrop and the modal into separate branches. Styling
+// the nearest "layer" is not enough: the actual overlay may remain interactive.
+// Restrict changes to the modal portal branch, never to the application shell.
+function findQuestOverlayAncestors(video: HTMLVideoElement): HTMLElement[] {
+    const appMount = document.getElementById("app-mount");
+    const appChrome = Array.from(document.querySelectorAll<HTMLElement>(
+        "#app-mount [data-list-id='guildsnav'], #app-mount nav, #app-mount [role='main']"
+    )).filter(element => !element.contains(video));
+    const ancestors: HTMLElement[] = [];
 
-    for (let depth = 0; depth < 24 && current.parentElement && current.parentElement !== document.body; depth++) {
-        const parent = current.parentElement;
-        if (Array.from(parent.children).some(sibling => sibling !== current && (
-            sibling.matches("[class*='backdrop' i]") || sibling.querySelector("[class*='backdrop' i]")
-        ))) return parent;
+    for (let current = video.parentElement; current && current !== document.body && current !== document.documentElement; current = current.parentElement) {
+        if (current === appMount || current.id === "app-mount") break;
+        // A shared application ancestor would hide the real Discord UI.
+        if (appChrome.some(element => current.contains(element))) break;
+        ancestors.push(current);
+    }
+    return ancestors;
+}
 
-        const rect = parent.getBoundingClientRect();
-        const position = getComputedStyle(parent).position;
-        if (!viewportLayer && parent.id !== "app-mount" &&
-            (position === "fixed" || position === "absolute") &&
-            rect.width >= window.innerWidth * 0.8 && rect.height >= window.innerHeight * 0.8 &&
-            rect.left <= window.innerWidth * 0.2 && rect.top <= window.innerHeight * 0.2) {
-            viewportLayer = parent;
-        }
-        current = parent;
+function hideQuestOverlay(player: MiniPlayer) {
+    const ancestors = findQuestOverlayAncestors(player.video);
+    for (const ancestor of ancestors) {
+        saveAndSetStyle(player, ancestor, "transform", "none");
+        saveAndSetStyle(player, ancestor, "filter", "none");
+        saveAndSetStyle(player, ancestor, "perspective", "none");
+        saveAndSetStyle(player, ancestor, "contain", "none");
+        saveAndSetStyle(player, ancestor, "will-change", "auto");
+        saveAndSetStyle(player, ancestor, "overflow", "visible");
+        saveAndSetStyle(player, ancestor, "visibility", "hidden");
+        saveAndSetStyle(player, ancestor, "pointer-events", "none");
     }
 
-    return viewportLayer ?? modal.parentElement ?? modal;
+    // Backdrops may be siblings of the modal portal instead of descendants.
+    // Only suppress explicit backdrop nodes, not application content.
+    for (const ancestor of ancestors) {
+        const parent = ancestor.parentElement;
+        if (!parent) continue;
+        for (const sibling of parent.children) {
+            if (!(sibling instanceof HTMLElement) || sibling === ancestor) continue;
+            if (sibling.matches("[class*='backdrop' i], [data-testid*='backdrop' i]")) {
+                saveAndSetStyle(player, sibling, "visibility", "hidden");
+                saveAndSetStyle(player, sibling, "pointer-events", "none");
+            }
+        }
+    }
 }
 
 function clampMiniPosition(player: MiniPlayer) {
@@ -210,7 +231,6 @@ function minimizeQuestModal() {
     const player = miniPlayer;
     if (!player || player.minimized || !player.modal.isConnected) return;
 
-    const layer = findQuestLayer(player.modal);
     const bounds = player.video.getBoundingClientRect();
     player.aspectRatio = player.video.videoWidth && player.video.videoHeight
         ? player.video.videoWidth / player.video.videoHeight
@@ -221,24 +241,9 @@ function minimizeQuestModal() {
     player.minimized = true;
     player.minimizeButton.hidden = true;
 
-    // Leave Discord's original video mounted so its playback and progress listeners remain active.
-    // Hiding, rather than unmounting, the modal allows the video to remain visible independently.
-    for (let ancestor = player.video.parentElement; ancestor && ancestor !== document.body; ancestor = ancestor.parentElement) {
-        saveAndSetStyle(player, ancestor, "transform", "none");
-        saveAndSetStyle(player, ancestor, "filter", "none");
-        saveAndSetStyle(player, ancestor, "perspective", "none");
-        saveAndSetStyle(player, ancestor, "contain", "none");
-        saveAndSetStyle(player, ancestor, "will-change", "auto");
-        saveAndSetStyle(player, ancestor, "overflow", "visible");
-        saveAndSetStyle(player, ancestor, "visibility", "hidden");
-        saveAndSetStyle(player, ancestor, "pointer-events", "none");
-        if (ancestor === layer) break;
-    }
-
-    for (const backdrop of layer.querySelectorAll<HTMLElement>("[class*='backdrop' i]")) {
-        saveAndSetStyle(player, backdrop, "visibility", "hidden");
-        saveAndSetStyle(player, backdrop, "pointer-events", "none");
-    }
+    // Preserve the actual React video and progress listeners while allowing
+    // pointer events to reach Discord behind the now-hidden modal portal.
+    hideQuestOverlay(player);
 
     saveAndSetStyle(player, player.video, "position", "fixed");
     saveAndSetStyle(player, player.video, "z-index", String(MINI_Z_INDEX));
