@@ -57,17 +57,18 @@ function findQuestDialog(video: HTMLVideoElement, isQuestModalCandidate: (root: 
     return null;
 }
 
-function findQuestLayer(modal: HTMLElement) {
+// Find the modal overlay by its backdrop sibling. A generic [class*="layer"] check
+// is unsafe: "videoPlayer" contains "layer" and can stop the search too early.
+function findQuestLayer(modal: HTMLElement): HTMLElement | null {
     let current = modal;
-    for (let depth = 0; depth < 10 && current.parentElement && current.parentElement !== document.body; depth++) {
+    for (let depth = 0; depth < 20 && current.parentElement && current.parentElement !== document.body; depth++) {
         const parent = current.parentElement;
         if (Array.from(parent.children).some(sibling => sibling !== current && (
-            sibling.matches("[class*='backdrop']") || sibling.querySelector("[class*='backdrop']")
+            sibling.matches("[class*='backdrop' i]") || sibling.querySelector("[class*='backdrop' i]")
         ))) return parent;
-        if (current.matches("[class*='layer']:not([class*='layerContainer'])")) return current;
         current = parent;
     }
-    return modal.parentElement ?? modal;
+    return null;
 }
 
 function clampMiniPosition(player: MiniPlayer) {
@@ -198,6 +199,10 @@ function minimizeQuestModal() {
     if (!player || player.minimized || !player.modal.isConnected) return;
 
     const layer = findQuestLayer(player.modal);
+    if (!layer) {
+        console.warn("[DisableQuestFocusPause] Could not locate quest modal backdrop; leaving the full modal open.");
+        return;
+    }
     const bounds = player.video.getBoundingClientRect();
     player.aspectRatio = player.video.videoWidth && player.video.videoHeight
         ? player.video.videoWidth / player.video.videoHeight
@@ -222,7 +227,7 @@ function minimizeQuestModal() {
         if (ancestor === layer) break;
     }
 
-    for (const backdrop of layer.querySelectorAll<HTMLElement>("[class*='backdrop']")) {
+    for (const backdrop of layer.querySelectorAll<HTMLElement>("[class*='backdrop' i]")) {
         saveAndSetStyle(player, backdrop, "visibility", "hidden");
         saveAndSetStyle(player, backdrop, "pointer-events", "none");
     }
