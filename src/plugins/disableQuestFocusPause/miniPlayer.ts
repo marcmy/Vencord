@@ -296,7 +296,7 @@ export function syncMiniPlayer(videos: HTMLVideoElement[], isQuestModalCandidate
     stopMiniPlayer();
     const minimizeButton = makeMiniButton("↘ Minimize video", minimizeQuestModal);
     minimizeButton.setAttribute("aria-label", "Minimize quest video");
-    minimizeButton.style.cssText += "position:absolute;top:12px;right:12px;z-index:1;padding:7px 10px;background:var(--button-secondary-background,#4e5058);color:#fff;box-shadow:0 2px 12px #0007;font:600 12px sans-serif;";
+    minimizeButton.style.cssText += `position:absolute;top:12px;right:12px;z-index:${MINI_Z_INDEX + 2};pointer-events:auto;padding:7px 10px;background:var(--button-secondary-background,#4e5058);color:#fff;box-shadow:0 2px 12px #0007;font:600 12px sans-serif;`;
     const modalPosition = getComputedStyle(modal).position === "static"
         ? { value: modal.style.getPropertyValue("position"), priority: modal.style.getPropertyPriority("position") }
         : null;

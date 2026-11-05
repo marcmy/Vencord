@@ -183,6 +183,57 @@ try {
         return "Quest dialog ownership, visibility, focus propagation, minimize/restore and cleanup regressions passed.";
     });
     console.log(result);
+    await page.addStyleTag({ content: `
+        .focusLock__49fc1 { position: fixed; left: 60px; top: 60px; width: 600px; height: 420px; }
+        .modalRoot_b824c5 { position: relative; z-index: 20; height: 100%; background: #222; }
+        .videoCont_b824c5 video { width: 500px; height: 280px; }
+    ` });
+    const point = await page.evaluate(async () => {
+        const video = document.getElementById("quest-video");
+        delete video.play;
+        const canvas = document.createElement("canvas");
+        canvas.width = 320;
+        canvas.height = 180;
+        const context = canvas.getContext("2d");
+        const draw = () => {
+            context.fillStyle = `hsl(${performance.now() / 10 % 360} 100% 50%)`;
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            requestAnimationFrame(draw);
+        };
+        draw();
+        video.srcObject = canvas.captureStream(30);
+        video.muted = true;
+        await video.play();
+        questHarness.default.start();
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const button = document.querySelector("[aria-label='Minimize quest video']");
+        const bounds = button.getBoundingClientRect();
+        const x = bounds.x + bounds.width / 2;
+        const y = bounds.y + bounds.height / 2;
+        if (document.elementFromPoint(x, y) !== button) throw new Error("Discord's stacked controls intercept the minimize button hit target");
+        return { x, y };
+    });
+    await page.mouse.click(point.x, point.y);
+    await page.waitForSelector(".vc-quest-mini-player", { visible: true, timeout: 2000 });
+    await page.evaluate(async () => {
+        const video = document.getElementById("quest-video");
+        const bounds = video.getBoundingClientRect();
+        if (document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2) !== video)
+            throw new Error("Minimized video must remain visible and hit-testable");
+        const time = video.currentTime;
+        await new Promise(resolve => video.requestVideoFrameCallback(resolve));
+        if (video.paused || video.currentTime <= time) throw new Error("Minimized video must continue producing playback frames");
+    });
+    const restore = await page.$(".vc-quest-mini-player button");
+    await restore.click();
+    await page.evaluate(() => {
+        const video = document.getElementById("quest-video");
+        if (document.querySelector(".vc-quest-mini-player") || video.style.position !== "")
+            throw new Error("Real pointer restore must recover the original quest video");
+        questHarness.default.stop();
+        video.srcObject.getTracks().forEach(track => track.stop());
+    });
+    console.log("Pointer hit-testing and real minimized playback-frame regressions passed.");
 } finally {
     await browser.close();
 }
