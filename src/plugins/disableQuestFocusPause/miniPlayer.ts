@@ -11,6 +11,7 @@ type MiniPlayer = {
     minimizeButton: HTMLButtonElement;
     floatingWindow: HTMLDivElement | null;
     styles: Map<HTMLElement, Map<string, SavedStyle>>;
+    modalPosition: SavedStyle | null;
     minimized: boolean;
     x: number;
     y: number;
@@ -47,9 +48,9 @@ function restoreMiniStyles(player: MiniPlayer) {
     player.styles.clear();
 }
 
-function findQuestDialog(video: HTMLVideoElement, isQuestModalCandidate: (root: HTMLElement) => boolean) {
+export function findQuestDialog(video: HTMLVideoElement, isQuestModalCandidate: (root: HTMLElement) => boolean) {
     const dialog = video.closest<HTMLElement>("[role='dialog'], [aria-modal='true']");
-    if (dialog && isQuestModalCandidate(dialog)) return dialog;
+    if (dialog) return isQuestModalCandidate(dialog) ? dialog : null;
 
     for (let parent = video.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
         if (parent.matches("[class*='modal']") && isQuestModalCandidate(parent)) return parent;
@@ -141,8 +142,7 @@ function restoreQuestModal() {
     player.floatingWindow = null;
     restoreMiniStyles(player);
     player.minimized = false;
-    player.minimizeButton.hidden = false;
-    positionMinimizeButton(player);
+    syncMinimizeButtonVisibility(player);
 }
 
 function makeMiniButton(label: string, onClick: () => void) {
@@ -258,13 +258,14 @@ function minimizeQuestModal() {
     layoutMiniPlayer(player);
 }
 
-function positionMinimizeButton(player: MiniPlayer) {
-    if (player.minimized) return;
-    const bounds = player.modal.getBoundingClientRect();
-    const x = Math.max(8, Math.min(window.innerWidth - 160, bounds.right - 170));
-    const y = Math.max(8, Math.min(window.innerHeight - 36, bounds.top + 12));
-    player.minimizeButton.style.left = `${x}px`;
-    player.minimizeButton.style.top = `${y}px`;
+function syncMinimizeButtonVisibility(player: MiniPlayer) {
+    const dialogs = Array.from(document.querySelectorAll<HTMLElement>("[role='dialog'], [aria-modal='true']"))
+        .filter(dialog => dialog.getClientRects().length && !dialog.closest("[aria-hidden='true'], [hidden], [inert]"));
+    const topDialog = dialogs.at(-1);
+    const hidden = player.minimized
+        || !!player.modal.closest("[aria-hidden='true'], [hidden], [inert]")
+        || !!topDialog && topDialog !== player.modal && !player.modal.contains(topDialog);
+    if (player.minimizeButton.hidden !== hidden) player.minimizeButton.hidden = hidden;
 }
 
 export function stopMiniPlayer() {
@@ -272,6 +273,11 @@ export function stopMiniPlayer() {
     if (!player) return;
     restoreQuestModal();
     player.minimizeButton.remove();
+    if (player.modalPosition) {
+        const { value, priority } = player.modalPosition;
+        if (value) player.modal.style.setProperty("position", value, priority);
+        else player.modal.style.removeProperty("position");
+    }
     miniPlayer = null;
 }
 
@@ -283,25 +289,29 @@ export function syncMiniPlayer(videos: HTMLVideoElement[], isQuestModalCandidate
         return;
     }
     if (miniPlayer?.video === video && miniPlayer.modal === modal) {
-        positionMinimizeButton(miniPlayer);
+        syncMinimizeButtonVisibility(miniPlayer);
         return;
     }
 
     stopMiniPlayer();
     const minimizeButton = makeMiniButton("↘ Minimize video", minimizeQuestModal);
     minimizeButton.setAttribute("aria-label", "Minimize quest video");
-    minimizeButton.style.cssText += `position:fixed;z-index:${MINI_Z_INDEX + 2};padding:7px 10px;background:var(--button-secondary-background,#4e5058);color:#fff;box-shadow:0 2px 12px #0007;font:600 12px sans-serif;`;
-    document.body.append(minimizeButton);
+    minimizeButton.style.cssText += "position:absolute;top:12px;right:12px;z-index:1;padding:7px 10px;background:var(--button-secondary-background,#4e5058);color:#fff;box-shadow:0 2px 12px #0007;font:600 12px sans-serif;";
+    const modalPosition = getComputedStyle(modal).position === "static"
+        ? { value: modal.style.getPropertyValue("position"), priority: modal.style.getPropertyPriority("position") }
+        : null;
+    if (modalPosition) modal.style.setProperty("position", "relative");
+    modal.append(minimizeButton);
     miniPlayer = {
         video, modal, minimizeButton, floatingWindow: null,
-        styles: new Map(), minimized: false,
+        styles: new Map(), modalPosition, minimized: false,
         x: 0, y: 0, width: 360, aspectRatio: 16 / 9
     };
-    positionMinimizeButton(miniPlayer);
+    syncMinimizeButtonVisibility(miniPlayer);
 }
 
 export function handleMiniResize() {
     if (miniPlayer?.minimized) layoutMiniPlayer(miniPlayer);
-    else if (miniPlayer) positionMinimizeButton(miniPlayer);
+    else if (miniPlayer) syncMinimizeButtonVisibility(miniPlayer);
 }
 

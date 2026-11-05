@@ -32,6 +32,7 @@
         "lint:fix": "pnpm lint --fix",
         "test": "pnpm test:ts && pnpm buildStandalone && pnpm buildWebStandalone && pnpm lint && pnpm lint-styles && pnpm generatePluginJson",
         "test:ts": "tsc --noEmit",
+        "test:questFocusPause": "node scripts/testQuestFocusPause.mjs",
         "bump": "./scripts/bump.sh"
     },
     "dependencies": {

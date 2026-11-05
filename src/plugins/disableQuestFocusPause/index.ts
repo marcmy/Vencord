@@ -7,7 +7,7 @@
 import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 
-import { handleMiniResize, stopMiniPlayer, syncMiniPlayer } from "./miniPlayer";
+import { findQuestDialog, handleMiniResize, stopMiniPlayer, syncMiniPlayer } from "./miniPlayer";
 
 type DocumentPropertyKey = "hidden" | "webkitHidden" | "visibilityState" | "webkitVisibilityState";
 type EventBinding = {
@@ -26,8 +26,6 @@ type OverrideState = {
 
 const LOG_PREFIX = "[DisableQuestFocusPause]";
 const QUEST_MODAL_MARKERS = [
-    "claim reward",
-    "learn more",
     "resume to continue progress",
     "we paused the video while you are away"
 ];
@@ -216,6 +214,10 @@ function dispatchRecoveryEvents() {
 }
 
 function handleBlockedFocusEvent(event: Event) {
+    // A capture listener on window also receives blur events from inputs and buttons.
+    if (event.type === "blur" && event.target !== window)
+        return;
+
     if (!shouldSpoofFocus() || recoveryDispatchDepth > 0)
         return;
 
@@ -242,30 +244,12 @@ function isQuestModalCandidate(root: HTMLElement) {
         return true;
     }
 
-    return text.includes("quest") && text.includes("learn more");
+    return /\bquests?\b/.test(text) && (text.includes("learn more") || text.includes("claim reward"));
 }
 
 function collectQuestVideos() {
-    const matches = new Set<HTMLVideoElement>();
-    const modalSelectors = [
-        "[aria-modal='true']",
-        "[role='dialog']",
-        "[class*='modal']"
-    ];
-
-    for (const modal of document.querySelectorAll<HTMLElement>(modalSelectors.join(","))) {
-        if (!modal.querySelector("video"))
-            continue;
-
-        if (!isQuestModalCandidate(modal))
-            continue;
-
-        for (const video of modal.querySelectorAll<HTMLVideoElement>("video")) {
-            matches.add(video);
-        }
-    }
-
-    return Array.from(matches);
+    return Array.from(document.querySelectorAll("video"))
+        .filter(video => findQuestDialog(video, isQuestModalCandidate));
 }
 
 function detachVideoListeners(video: HTMLVideoElement, listeners: VideoListeners) {
@@ -348,7 +332,9 @@ function startObserver() {
     observer.observe(document.body, {
         childList: true,
         subtree: true,
-        characterData: true
+        characterData: true,
+        attributes: true,
+        attributeFilter: ["aria-hidden", "hidden", "inert"]
     });
 }
 

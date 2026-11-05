@@ -20,6 +20,10 @@ Local-only Vencord plugin that prevents Discord quest videos from pausing when t
 3. Move or resize the floating player and try navigating Discord channels and typing in a message box.
 4. Click **Restore** and verify the original modal and playback are intact.
 5. Close the quest or disable the plugin and check that no floating UI or invisible backdrop remains.
+6. While a quest is open, open Settings or another dialog and verify that the quest's minimize button is not shown over it. Close that dialog and verify that the button returns on the quest.
+7. Select an emoji or GIF, return to the message box, and press Enter. Check this both during and after quest playback.
+
+Run `pnpm test:questFocusPause` for isolated Chromium DOM regressions covering dialog ownership, visibility, focus-event propagation, minimize/restore, and cleanup. Set `BROWSER_PATH` if Chromium is not installed in a standard location. This does not log into Discord or verify quest progress or Discord's emoji picker.
 
 ## Caveat
 
