@@ -136,6 +136,50 @@ try {
         check(otherQuest.style.position === "", "Disabling must restore modal positioning");
         check(document.hasFocus === originalHasFocus, "Disabling must restore focus overrides");
         window.removeEventListener("blur", onWindowBlur);
+        container.remove();
+
+        // Claimed-quest replay layout from the reported capture, without either reward CTA.
+        const capturedLayout = document.createElement("div");
+        capturedLayout.innerHTML = `
+            <section class="panels__5e434"><div class="videoContainer_df39b2"><video id="account-video"></video></div></section>
+            <div class="heroBackground__955a3"><video id="hero-video"></video></div>
+            <div class="layerContainer__59d0d"><div class="layer_bc663c"><div>
+                <div class="focusLock__49fc1" role="dialog">
+                    <div class="modalRoot_b824c5 modalRootLandscape_b824c5 root__49fc1">
+                        <div class="modalBg_b824c5"><div class="modalBody_b824c5"><div class="modalContent_b824c5">
+                            <div class="videoCont_b824c5 themeBlurple_e76b42" role="button">
+                                <div class="videoContInnerRelative_b824c5"><video id="quest-video"></video>Video Quest · Reward claimed</div>
+                            </div>
+                            <div class="footer_f3bebf"><div class="details_f3bebf"><div class="progressWrapper__32661">
+                                <div class="progressCont__32661" role="button"><div class="outer__146e2" role="progressbar">
+                                    <div class="inner__146e2"><div class="questRewardTile__28141"><video id="reward-video"></video></div></div>
+                                </div></div>
+                            </div></div></div>
+                        </div></div></div>
+                    </div>
+                </div>
+            </div></div></div>`;
+        document.body.append(capturedLayout);
+        const capturedDialog = capturedLayout.querySelector("[role='dialog']");
+        const playbackVideo = capturedLayout.querySelector("#quest-video");
+        const plays = new Map();
+        for (const item of capturedLayout.querySelectorAll("video")) {
+            item.play = () => { plays.set(item, (plays.get(item) ?? 0) + 1); return Promise.resolve(); };
+        }
+        check(isQuestModalCandidate(capturedDialog), "Captured quest dialog without Learn more or Claim reward must be recognized");
+        const capturedVideos = collectQuestVideos();
+        check(capturedVideos.length === 1 && capturedVideos[0] === playbackVideo, "Only the quest playback video may be tracked, not reward/account/hero animations");
+        plugin.start();
+        await settle();
+        check(button()?.parentElement === capturedDialog && !button().hidden, "Captured quest layout must have a visible minimize button");
+        check((plays.get(playbackVideo) ?? 0) > 0 && plays.size === 1, "Only quest playback may be resumed");
+        button().click();
+        await settle();
+        check(playbackVideo.style.position === "fixed", "Minimizing must float the quest playback video");
+        check(capturedLayout.querySelector("#reward-video").style.position === "", "Minimizing must not float the reward animation");
+        plugin.stop();
+        check(!button() && !document.querySelector(".vc-quest-mini-player"), "Captured layout must clean up when disabled");
+        check(playbackVideo.style.position === "", "Disabling must restore the captured playback video");
         return "Quest dialog ownership, visibility, focus propagation, minimize/restore and cleanup regressions passed.";
     });
     console.log(result);

@@ -25,6 +25,7 @@ type OverrideState = {
 };
 
 const LOG_PREFIX = "[DisableQuestFocusPause]";
+const QUEST_PLAYBACK_SELECTOR = "[class*='videoCont_'] video";
 const QUEST_MODAL_MARKERS = [
     "resume to continue progress",
     "we paused the video while you are away"
@@ -244,12 +245,22 @@ function isQuestModalCandidate(root: HTMLElement) {
         return true;
     }
 
-    return /\bquests?\b/.test(text) && (text.includes("learn more") || text.includes("claim reward"));
+    return /\bquests?\b/.test(text) && (
+        root.querySelector(QUEST_PLAYBACK_SELECTOR) !== null
+        || text.includes("learn more")
+        || text.includes("claim reward")
+    );
 }
 
 function collectQuestVideos() {
     return Array.from(document.querySelectorAll("video"))
-        .filter(video => findQuestDialog(video, isQuestModalCandidate));
+        .filter(video => {
+            const modal = findQuestDialog(video, isQuestModalCandidate);
+            if (!modal) return false;
+
+            const playbackVideo = modal.querySelector(QUEST_PLAYBACK_SELECTOR);
+            return playbackVideo ? video === playbackVideo : !video.closest("[class*='questRewardTile_']");
+        });
 }
 
 function detachVideoListeners(video: HTMLVideoElement, listeners: VideoListeners) {

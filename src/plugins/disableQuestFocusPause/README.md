@@ -25,6 +25,8 @@ Local-only Vencord plugin that prevents Discord quest videos from pausing when t
 
 Run `pnpm test:questFocusPause` for isolated Chromium DOM regressions covering dialog ownership, visibility, focus-event propagation, minimize/restore, and cleanup. Set `BROWSER_PATH` if Chromium is not installed in a standard location. This does not log into Discord or verify quest progress or Discord's emoji picker.
 
+The regression fixtures include the captured claimed-quest replay layout without reward prompts, plus separate account, hero, and reward-animation videos. Only the quest playback video should be resumed or minimized.
+
 ## Caveat
 
 This is intentionally a local workaround, not an upstream-safe plugin. Discord does not expose a stable public quest API for this flow, so detection is based on the current modal structure and copy. The mini-player keeps Discord's original React modal and video mounted rather than cloning the stream. Changes to modal structure, stacking contexts or focus trapping may require further adjustments. In particular, keyboard focus handling and quest progress need to be checked with an actual live quest; static TypeScript checks cannot confirm either.
