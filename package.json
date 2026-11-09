@@ -33,6 +33,7 @@
         "test": "pnpm test:ts && pnpm buildStandalone && pnpm buildWebStandalone && pnpm lint && pnpm lint-styles && pnpm generatePluginJson",
         "test:ts": "tsc --noEmit",
         "test:questFocusPause": "node scripts/testQuestFocusPause.mjs",
+        "test:expressionPickerFocus": "node scripts/testExpressionPickerFocus.mjs",
         "bump": "./scripts/bump.sh"
     },
     "dependencies": {
