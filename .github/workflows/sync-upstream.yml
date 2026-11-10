@@ -77,6 +77,8 @@ jobs:
               shell: bash
               env:
                   GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
+                  # Otherwise gh targets the "upstream" remote (Vendicated/Vencord)
+                  GH_REPO: ${{ github.repository }}
               run: |
                   set -euo pipefail
                   branch=upstream-sync
