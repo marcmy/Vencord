@@ -9,6 +9,10 @@ updates:
       open-pull-requests-limit: 100
       cooldown:
           default-days: 7
+      ignore:
+          # TypeScript 7 drops the JS compiler API used by generatePluginList, ts-patch and typescript-transform-paths
+          - dependency-name: "typescript"
+            update-types: ["version-update:semver-major"]
 
     - package-ecosystem: "github-actions"
       directory: "/"
