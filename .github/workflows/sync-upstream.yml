@@ -7,6 +7,7 @@ on:
 
 permissions:
     contents: write
+    pull-requests: write
 
 concurrency:
     group: sync-upstream
@@ -42,6 +43,7 @@ jobs:
                   fi
 
             - name: Merge upstream/main
+              id: merge
               if: steps.upstream.outputs.changed == 'true'
               shell: bash
               run: |
@@ -49,6 +51,7 @@ jobs:
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
                   if git merge --no-edit upstream/main; then
+                      echo "ready=true" >> "$GITHUB_OUTPUT"
                       exit 0
                   fi
 
@@ -58,29 +61,78 @@ jobs:
                       git checkout --ours -- .github/pull_request_template.md
                       git add .github/pull_request_template.md
                       git commit --no-edit
+                      echo "ready=true" >> "$GITHUB_OUTPUT"
                   else
-                      echo "Automatic merge failed with unexpected conflicts:"
+                      echo "::warning::Upstream merge has conflicts; opening a pull request to resolve them."
                       printf ' - %s\n' "${conflicts[@]}"
-                      exit 1
+                      printf '%s\n' "${conflicts[@]}" > "$RUNNER_TEMP/conflicts.txt"
+                      git merge --abort
+                      echo "ready=false" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Open conflict pull request
+              if: steps.merge.outputs.ready == 'false'
+              shell: bash
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  branch=upstream-sync
+                  upstream_sha="$(git rev-parse upstream/main)"
+                  pr="$(gh pr list --head "$branch" --base custom-plugins --state open --json number --jq '.[0].number // empty')"
+
+                  if [[ -z "$pr" ]]; then
+                      git push --force origin "upstream/main:refs/heads/$branch"
+                  # Fast-forward only, so a partially resolved branch is never overwritten
+                  elif ! git push origin "upstream/main:refs/heads/$branch"; then
+                      echo "::notice::$branch has local resolution commits; leaving it untouched."
+                  fi
+
+                  {
+                      echo "Automatic sync of \`Vendicated/Vencord@main\` (\`${upstream_sha:0:7}\`) into \`custom-plugins\` hit merge conflicts."
+                      echo
+                      echo "### Conflicting files"
+                      sed 's/.*/- `&`/' "$RUNNER_TEMP/conflicts.txt"
+                      echo
+                      echo "### Resolving"
+                      echo "Use **Resolve conflicts** below for simple text conflicts, or locally:"
+                      echo
+                      echo '```bash'
+                      echo "git fetch origin"
+                      echo "git switch custom-plugins && git pull"
+                      echo "git merge origin/$branch"
+                      echo "# fix conflicts; for pnpm-lock.yaml take either side then run: pnpm install"
+                      echo "git add -A && git commit --no-edit && git push"
+                      echo '```'
+                      echo
+                      echo "Pushing the resolved merge to \`custom-plugins\` marks this PR as merged automatically."
+                  } > "$RUNNER_TEMP/body.md"
+
+                  if [[ -z "$pr" ]]; then
+                      gh pr create --head "$branch" --base custom-plugins \
+                          --title "Resolve upstream sync conflicts" \
+                          --body-file "$RUNNER_TEMP/body.md"
+                  else
+                      gh pr edit "$pr" --body-file "$RUNNER_TEMP/body.md"
                   fi
 
             - name: Set up pnpm
-              if: steps.upstream.outputs.changed == 'true'
+              if: steps.merge.outputs.ready == 'true'
               uses: pnpm/action-setup@v6
 
             - name: Use Node.js 24
-              if: steps.upstream.outputs.changed == 'true'
+              if: steps.merge.outputs.ready == 'true'
               uses: actions/setup-node@v7
               with:
                   node-version: 24
                   cache: "pnpm"
 
             - name: Install dependencies
-              if: steps.upstream.outputs.changed == 'true'
+              if: steps.merge.outputs.ready == 'true'
               run: pnpm install --frozen-lockfile
 
             - name: Validate merged branch
-              if: steps.upstream.outputs.changed == 'true'
+              if: steps.merge.outputs.ready == 'true'
               run: |
                   pnpm buildStandalone
                   pnpm testTsc
@@ -90,7 +142,7 @@ jobs:
                   pnpm generatePluginJson
 
             - name: Guard customized plugins against upstream deletion
-              if: steps.upstream.outputs.changed == 'true'
+              if: steps.merge.outputs.ready == 'true'
               shell: bash
               env:
                   BASE_SHA: ${{ steps.upstream.outputs.base_sha }}
@@ -105,6 +157,7 @@ jobs:
                       printf '%s\n' "$deleted"
                       exit 1
                   fi
+
             - name: Push sync
-              if: steps.upstream.outputs.changed == 'true'
+              if: steps.merge.outputs.ready == 'true'
               run: git push origin HEAD:custom-plugins
