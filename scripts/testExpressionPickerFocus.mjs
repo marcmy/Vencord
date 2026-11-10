@@ -6,6 +6,7 @@
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+
 import { build } from "esbuild";
 import puppeteer from "puppeteer-core";
 

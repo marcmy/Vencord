@@ -180,9 +180,9 @@ jobs:
               if: steps.merge.outputs.ready == 'true'
               run: |
                   pnpm buildStandalone
-                  pnpm testTsc
+                  pnpm test:ts
                   pnpm lint
-                  pnpm lint-styles
+                  pnpm fmt:check
                   pnpm buildWeb
                   pnpm generatePluginJson
 
