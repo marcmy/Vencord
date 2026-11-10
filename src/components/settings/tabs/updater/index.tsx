@@ -99,7 +99,7 @@ function Updater() {
                 />
             </div>
 
-            <Heading className={classes(Margins.top20, Margins.bottom8)}>Repo</Heading>
+            <Heading className={classes(Margins.top20, Margins.bottom8)}>Vencord Build</Heading>
 
             <Paragraph>
                 {repoPending

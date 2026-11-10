@@ -1,0 +1,208 @@
+name: Sync upstream
+
+on:
+    schedule:
+        - cron: "17 9/3 * * *"
+    workflow_dispatch:
+
+permissions:
+    contents: write
+    pull-requests: write
+
+concurrency:
+    group: sync-upstream
+    cancel-in-progress: false
+
+jobs:
+    sync:
+        if: github.repository == 'marcmy/Vencord'
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Check out custom branch
+              uses: actions/checkout@v7
+              with:
+                  ref: custom-plugins
+                  fetch-depth: 0
+                  # GITHUB_TOKEN cannot push upstream changes to .github/workflows
+                  token: ${{ secrets.SYNC_TOKEN || github.token }}
+
+            - name: Fetch upstream
+              run: |
+                  git remote add upstream https://github.com/Vendicated/Vencord.git
+                  git fetch --prune upstream main
+
+            - name: Check for upstream changes
+              id: upstream
+              shell: bash
+              run: |
+                  if git merge-base --is-ancestor upstream/main HEAD; then
+                      echo "changed=false" >> "$GITHUB_OUTPUT"
+                      echo "custom-plugins already contains upstream/main."
+                  else
+                      echo "changed=true" >> "$GITHUB_OUTPUT"
+                      echo "base_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Merge upstream/main
+              id: merge
+              if: steps.upstream.outputs.changed == 'true'
+              shell: bash
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+                  if git merge --no-edit upstream/main; then
+                      echo "ready=true" >> "$GITHUB_OUTPUT"
+                      exit 0
+                  fi
+
+                  mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+                  if [[ ${#conflicts[@]} -eq 1 && "${conflicts[0]}" == ".github/pull_request_template.md" ]]; then
+                      echo "Resolving fork-specific PR template conflict with custom-plugins version."
+                      git checkout --ours -- .github/pull_request_template.md
+                      git add .github/pull_request_template.md
+                      git commit --no-edit
+                      echo "ready=true" >> "$GITHUB_OUTPUT"
+                  else
+                      echo "::warning::Upstream merge has conflicts; opening a pull request to resolve them."
+                      printf ' - %s\n' "${conflicts[@]}"
+
+                      # Modify/delete conflicts can't be resolved in GitHub's conflict editor, so the surviving version is kept
+                      git ls-files -u | awk -F'\t' '{ split($1, f, " "); s[$2] = s[$2] f[3] } END { for (p in s) if (s[p] !~ /2/ || s[p] !~ /3/) print p }' | sort > "$RUNNER_TEMP/deleted.txt"
+                      : > "$RUNNER_TEMP/conflicts.txt"
+                      for file in "${conflicts[@]}"; do
+                          case "$file" in
+                              .github/pull_request_template.md | pnpm-lock.yaml) ;;
+                              *) grep -qxF "$file" "$RUNNER_TEMP/deleted.txt" || echo "$file" >> "$RUNNER_TEMP/conflicts.txt" ;;
+                          esac
+                      done
+
+                      if [[ -s "$RUNNER_TEMP/conflicts.txt" ]]; then
+                          # The PR head is upstream/main itself, so GitHub's "Resolve conflicts" editor can merge custom-plugins into it.
+                          # Files without text conflicts are first set to their custom-plugins version so they merge cleanly.
+                          base="$(git rev-parse HEAD)"
+                          git merge --abort
+                          git checkout -q --detach upstream/main
+                          for file in .github/pull_request_template.md pnpm-lock.yaml $(cat "$RUNNER_TEMP/deleted.txt"); do
+                              printf '%s\n' "${conflicts[@]}" | grep -qxF "$file" || continue
+                              if git cat-file -e "$base:$file" 2>/dev/null; then
+                                  git checkout "$base" -- "$file"
+                              else
+                                  git rm -q -- "$file"
+                              fi
+                          done
+                          if ! git diff --cached --quiet; then
+                              git commit -m "chore(sync): keep custom-plugins versions of non-editable conflicts [skip ci]"
+                          fi
+                      else
+                          # Only non-editable conflicts: commit the merge, and the sync-conflicts workflow regenerates pnpm-lock.yaml
+                          git checkout --ours -- .github/pull_request_template.md 2>/dev/null || true
+                          git checkout --theirs -- pnpm-lock.yaml 2>/dev/null || true
+                          git add -A -- "${conflicts[@]}"
+                          git commit --no-edit
+                      fi
+                      echo "ready=false" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Open conflict pull request
+              if: steps.merge.outputs.ready == 'false'
+              shell: bash
+              env:
+                  GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
+                  # Otherwise gh targets the "upstream" remote (Vendicated/Vencord)
+                  GH_REPO: ${{ github.repository }}
+              run: |
+                  set -euo pipefail
+                  branch=upstream-sync
+                  upstream_sha="$(git rev-parse upstream/main)"
+                  pr="$(gh pr list --head "$branch" --base custom-plugins --state open --json number --jq '.[0].number // empty')"
+
+                  if git fetch origin "$branch" 2>/dev/null; then
+                      # Only replace the branch while it holds nothing but bot commits
+                      authors="$(git log --format=%an FETCH_HEAD --not upstream/main origin/custom-plugins | sort -u)"
+                      if [[ -n "$pr" && -n "$authors" && "$authors" != "github-actions[bot]" ]]; then
+                          echo "::notice::$branch has resolution commits; leaving it untouched until the PR is merged."
+                          exit 0
+                      fi
+                      if [[ -n "$pr" ]] && git diff --quiet HEAD FETCH_HEAD; then
+                          echo "$branch is already up to date."
+                          exit 0
+                      fi
+                  fi
+                  git push --force origin "HEAD:refs/heads/$branch"
+
+                  {
+                      echo "Automatic sync of \`Vendicated/Vencord@main\` (\`${upstream_sha:0:7}\`) into \`custom-plugins\` hit merge conflicts."
+                      echo
+                      if [[ -s "$RUNNER_TEMP/conflicts.txt" ]]; then
+                          echo "### Resolve these conflicts"
+                          sed 's/.*/- `&`/' "$RUNNER_TEMP/conflicts.txt"
+                          echo
+                          echo "Click **Resolve conflicts** at the bottom of this page, pick the right code in each file, then **Mark as resolved** and **Commit merge**. That commits the merge to \`$branch\`."
+                          echo
+                      fi
+                      if [[ -s "$RUNNER_TEMP/deleted.txt" ]]; then
+                          echo "### Deleted on one side, changed on the other"
+                          echo "GitHub's editor can't resolve these, so the surviving version was kept. Check whether each should still exist:"
+                          sed 's/.*/- `&`/' "$RUNNER_TEMP/deleted.txt"
+                          echo
+                      fi
+                      echo "### What happens next"
+                      echo "- After the merge commit, the **Sync conflicts** check regenerates \`pnpm-lock.yaml\` and commits it here."
+                      echo "- When the checks pass, merge with **Create a merge commit**. Squash or rebase drops the upstream history, and the next sync would conflict again."
+                  } > "$RUNNER_TEMP/body.md"
+
+                  if [[ -z "$pr" ]]; then
+                      gh pr create --head "$branch" --base custom-plugins \
+                          --title "Resolve upstream sync conflicts" \
+                          --body-file "$RUNNER_TEMP/body.md"
+                  else
+                      gh pr edit "$pr" --body-file "$RUNNER_TEMP/body.md"
+                  fi
+
+            - name: Set up pnpm
+              if: steps.merge.outputs.ready == 'true'
+              uses: pnpm/action-setup@v6
+
+            - name: Use Node.js 24
+              if: steps.merge.outputs.ready == 'true'
+              uses: actions/setup-node@v7
+              with:
+                  node-version: 24
+                  cache: "pnpm"
+
+            - name: Install dependencies
+              if: steps.merge.outputs.ready == 'true'
+              run: pnpm install --frozen-lockfile
+
+            - name: Validate merged branch
+              if: steps.merge.outputs.ready == 'true'
+              run: |
+                  pnpm buildStandalone
+                  pnpm test:ts
+                  pnpm lint
+                  pnpm fmt:check
+                  pnpm buildWeb
+                  pnpm generatePluginJson
+
+            - name: Guard customized plugins against upstream deletion
+              if: steps.merge.outputs.ready == 'true'
+              shell: bash
+              env:
+                  BASE_SHA: ${{ steps.upstream.outputs.base_sha }}
+              run: |
+                  set -euo pipefail
+                  for file in src/plugins/splitLargeMessages/index.ts src/plugins/showHiddenChannels/index.tsx; do
+                      test -f "$file" || { echo "::error::Missing fork-critical plugin: $file"; exit 1; }
+                  done
+                  deleted="$(git diff --name-only --diff-filter=D "$BASE_SHA" HEAD -- src/plugins/splitLargeMessages src/plugins/showHiddenChannels)"
+                  if [[ -n "$deleted" ]]; then
+                      echo "::error::Upstream sync removed customized plugin files:"
+                      printf '%s\n' "$deleted"
+                      exit 1
+                  fi
+
+            - name: Push sync
+              if: steps.merge.outputs.ready == 'true'
+              run: git push origin HEAD:custom-plugins

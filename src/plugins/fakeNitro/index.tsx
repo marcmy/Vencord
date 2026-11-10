@@ -80,6 +80,7 @@ const mediaSizes = [16, 32, 48, 56, 64, 96, 128, 160, 256, 512, 1024];
 
 const DEFAULT_EMOJI_SIZE = 48;
 const DEFAULT_STICKER_SIZE = 160;
+const MAX_JUMBO_EMOJIS = 27;
 
 const settings = definePluginSettings({
     enableEmojiBypass: {
@@ -519,9 +520,52 @@ export default definePlugin({
 
     transformAst(ast: any[]) {
         try {
-            if (!settings.store.transformCompoundSentence && ast.length > 1) {
+            const isFakeNitroEmojiLink = (node: any) =>
+                node?.type === "link"
+                && typeof node.target === "string"
+                && fakeNitroEmojiRegex.test(node.target);
+
+            let hasFakeNitroEmoji = false;
+            let emojiOnlyCount = 0;
+            let isEmojiOnly = ast.length > 0;
+
+            for (const node of ast) {
+                if (node?.type === "emoji" || node?.type === "customEmoji") {
+                    emojiOnlyCount++;
+                    continue;
+                }
+
+                if (isFakeNitroEmojiLink(node)) {
+                    hasFakeNitroEmoji = true;
+                    emojiOnlyCount++;
+                    continue;
+                }
+
+                if (node?.type === "text") {
+                    const text = typeof node.content === "string"
+                        ? node.content
+                        : typeof node.text === "string"
+                            ? node.text
+                            : typeof node.value === "string"
+                                ? node.value
+                                : null;
+
+                    if (text != null && text.trim() === "") continue;
+                }
+
+                isEmojiOnly = false;
+                break;
+            }
+
+            const isEmojiOnlyWithFakeNitro = isEmojiOnly && hasFakeNitroEmoji && emojiOnlyCount > 0;
+            const shouldJumbo = isEmojiOnlyWithFakeNitro && emojiOnlyCount <= MAX_JUMBO_EMOJIS;
+
+            // Compound messages are normally left untouched. Emoji-only messages containing FakeNitro
+            // links are special-cased so they render with the same jumbo sizing as real emoji-only messages.
+            if (!settings.store.transformCompoundSentence && ast.length > 1 && !isEmojiOnlyWithFakeNitro) {
                 return ast;
             }
+
             // Filter out sticker links. These are transformed into actual stickers later, so we don't want duplicate links
             if (settings.store.transformStickers) {
                 ast = ast.filter(node => {
@@ -558,10 +602,21 @@ export default definePlugin({
                     return {
                         animated,
                         emojiId,
+                        jumboable: shouldJumbo,
                         name: `:${emojiName}:`,
                         type: "customEmoji",
                         fake: true
                     };
+                });
+            }
+
+            if (shouldJumbo) {
+                ast = ast.map(node => {
+                    if (node?.type !== "emoji" && node?.type !== "customEmoji") return node;
+
+                    return node?.emoji && typeof node.emoji === "object"
+                        ? { ...node, jumboable: true, emoji: { ...node.emoji, jumboable: true } }
+                        : { ...node, jumboable: true };
                 });
             }
         } catch (e) {

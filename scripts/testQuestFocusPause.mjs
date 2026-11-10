@@ -1,0 +1,240 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+
+import { build } from "esbuild";
+import puppeteer from "puppeteer-core";
+
+const executablePath = process.env.BROWSER_PATH ?? [
+    "C:/Program Files/Google/Chrome/Application/chrome.exe",
+    "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+    "/usr/bin/chromium",
+    "/usr/bin/google-chrome"
+].find(path => existsSync(path));
+assert.ok(executablePath, "Set BROWSER_PATH to a Chromium executable to run the DOM regression tests.");
+
+const { outputFiles } = await build({
+    stdin: {
+        contents: readFileSync("src/plugins/disableQuestFocusPause/index.ts", "utf8")
+            + "\nexport { isQuestModalCandidate, collectQuestVideos };",
+        resolveDir: "src/plugins/disableQuestFocusPause",
+        loader: "ts"
+    },
+    bundle: true,
+    format: "iife",
+    globalName: "questHarness",
+    write: false,
+    plugins: [{
+        name: "discord-fixture",
+        setup(builder) {
+            builder.onResolve({ filter: /^@utils\/(constants|types)$/ }, args => ({ path: args.path, namespace: "fixture" }));
+            builder.onLoad({ filter: /.*/, namespace: "fixture" }, args => ({
+                contents: args.path.endsWith("types")
+                    ? "export default plugin => plugin;"
+                    : "export const Devs = { marcmy: {} };"
+            }));
+        }
+    }]
+});
+
+const browser = await puppeteer.launch({ executablePath, headless: true });
+try {
+    const page = await browser.newPage();
+    await page.setContent("<main><input id='composer'><button id='picker'>Emoji picker</button></main>");
+    await page.addScriptTag({ content: outputFiles[0].text });
+    const result = await page.evaluate(async () => {
+        const { default: plugin, isQuestModalCandidate, collectQuestVideos } = questHarness;
+        const check = (condition, message) => { if (!condition) throw new Error(message); };
+        const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const dialog = (text, className = "") => {
+            const modal = document.createElement("div");
+            modal.setAttribute("role", "dialog");
+            modal.className = className;
+            modal.append(text, document.createElement("video"));
+            modal.querySelector("video").play = () => Promise.resolve();
+            document.body.append(modal);
+            return modal;
+        };
+        const button = () => document.querySelector("[aria-label='Minimize quest video']");
+        const originalHasFocus = document.hasFocus;
+        const quest = dialog("Video Quest: Learn more");
+        const video = quest.querySelector("video");
+        plugin.start();
+        await settle();
+        check(button()?.parentElement === quest, "Minimize button must belong to its quest dialog");
+        check(!button().hidden, "Quest button should initially be visible");
+        check(getComputedStyle(quest).position === "relative", "Static quest dialogs need a positioned anchor");
+
+        const settings = dialog("Settings: Learn more. Claim reward.", "modal-settings");
+        await settle();
+        check(!isQuestModalCandidate(settings), "Generic settings copy must not identify a quest");
+        check(collectQuestVideos().length === 1, "Settings videos must not be tracked");
+        check(button().hidden, "Quest button must hide behind another dialog");
+        settings.remove();
+        await settle();
+        check(!button().hidden, "Closing settings must reveal the quest button");
+
+        quest.setAttribute("aria-hidden", "true");
+        await settle();
+        check(button().hidden, "Hidden quest dialog must not expose controls");
+        quest.removeAttribute("aria-hidden");
+        await settle();
+        check(!button().hidden, "Quest controls should recover when the dialog is exposed");
+
+        let inputBlurs = 0;
+        const composer = document.getElementById("composer");
+        const picker = document.getElementById("picker");
+        composer.addEventListener("blur", () => inputBlurs++);
+        composer.focus();
+        picker.focus();
+        check(inputBlurs === 1, "Element blur must reach the input listener during quest playback");
+        let windowBlurs = 0;
+        const onWindowBlur = () => windowBlurs++;
+        window.addEventListener("blur", onWindowBlur);
+        window.dispatchEvent(new FocusEvent("blur"));
+        check(windowBlurs === 0, "Actual window blur must still be blocked during quest playback");
+
+        button().click();
+        await settle();
+        check(document.querySelector(".vc-quest-mini-player"), "Minimizing must still create the floating player");
+        check(video.style.position === "fixed", "The original video must be used by the floating player");
+        Array.from(document.querySelectorAll(".vc-quest-mini-player button")).find(node => node.textContent === "Restore").click();
+        await settle();
+        check(!document.querySelector(".vc-quest-mini-player"), "Restore must remove the floating player");
+        check(video.style.position === "", "Restore must restore video styles");
+
+        let buttonMutations = 0;
+        const observer = new MutationObserver(records => { buttonMutations += records.length; });
+        observer.observe(button(), { attributes: true });
+        await settle();
+        await settle();
+        observer.disconnect();
+        check(buttonMutations === 0, "Observer scans must not rewrite the hidden attribute indefinitely");
+
+        quest.remove();
+        await settle();
+        check(!button(), "Closing a quest must remove its controls");
+        check(quest.style.position === "", "Closing a quest must restore modal positioning");
+        window.dispatchEvent(new FocusEvent("blur"));
+        check(windowBlurs === 1, "Window blur must pass through after closing the quest");
+
+        const container = document.createElement("div");
+        container.className = "modal-container";
+        document.body.append(container);
+        const otherQuest = dialog("Video Quest: Claim reward");
+        const ordinary = dialog("Settings: Learn more");
+        container.append(otherQuest, ordinary);
+        check(collectQuestVideos().length === 1, "Shared modal wrappers must not classify sibling settings videos");
+        await settle();
+        button()?.click();
+        plugin.stop();
+        check(!button() && !document.querySelector(".vc-quest-mini-player"), "Disabling the plugin must remove all injected UI");
+        check(otherQuest.style.position === "", "Disabling must restore modal positioning");
+        check(document.hasFocus === originalHasFocus, "Disabling must restore focus overrides");
+        window.removeEventListener("blur", onWindowBlur);
+        container.remove();
+
+        // Claimed-quest replay layout from the reported capture, without either reward CTA.
+        const capturedLayout = document.createElement("div");
+        capturedLayout.innerHTML = `
+            <section class="panels__5e434"><div class="videoContainer_df39b2"><video id="account-video"></video></div></section>
+            <div class="heroBackground__955a3"><video id="hero-video"></video></div>
+            <div class="layerContainer__59d0d"><div class="layer_bc663c"><div>
+                <div class="focusLock__49fc1" role="dialog">
+                    <div class="modalRoot_b824c5 modalRootLandscape_b824c5 root__49fc1">
+                        <div class="modalBg_b824c5"><div class="modalBody_b824c5"><div class="modalContent_b824c5">
+                            <div class="videoCont_b824c5 themeBlurple_e76b42" role="button">
+                                <div class="videoContInnerRelative_b824c5"><video id="quest-video"></video>Video Quest · Reward claimed</div>
+                            </div>
+                            <div class="footer_f3bebf"><div class="details_f3bebf"><div class="progressWrapper__32661">
+                                <div class="progressCont__32661" role="button"><div class="outer__146e2" role="progressbar">
+                                    <div class="inner__146e2"><div class="questRewardTile__28141"><video id="reward-video"></video></div></div>
+                                </div></div>
+                            </div></div></div>
+                        </div></div></div>
+                    </div>
+                </div>
+            </div></div></div>`;
+        document.body.append(capturedLayout);
+        const capturedDialog = capturedLayout.querySelector("[role='dialog']");
+        const playbackVideo = capturedLayout.querySelector("#quest-video");
+        const plays = new Map();
+        for (const item of capturedLayout.querySelectorAll("video")) {
+            item.play = () => { plays.set(item, (plays.get(item) ?? 0) + 1); return Promise.resolve(); };
+        }
+        check(isQuestModalCandidate(capturedDialog), "Captured quest dialog without Learn more or Claim reward must be recognized");
+        const capturedVideos = collectQuestVideos();
+        check(capturedVideos.length === 1 && capturedVideos[0] === playbackVideo, "Only the quest playback video may be tracked, not reward/account/hero animations");
+        plugin.start();
+        await settle();
+        check(button()?.parentElement === capturedDialog && !button().hidden, "Captured quest layout must have a visible minimize button");
+        check((plays.get(playbackVideo) ?? 0) > 0 && plays.size === 1, "Only quest playback may be resumed");
+        button().click();
+        await settle();
+        check(playbackVideo.style.position === "fixed", "Minimizing must float the quest playback video");
+        check(capturedLayout.querySelector("#reward-video").style.position === "", "Minimizing must not float the reward animation");
+        plugin.stop();
+        check(!button() && !document.querySelector(".vc-quest-mini-player"), "Captured layout must clean up when disabled");
+        check(playbackVideo.style.position === "", "Disabling must restore the captured playback video");
+        return "Quest dialog ownership, visibility, focus propagation, minimize/restore and cleanup regressions passed.";
+    });
+    console.log(result);
+    await page.addStyleTag({ content: `
+        .focusLock__49fc1 { position: fixed; left: 60px; top: 60px; width: 600px; height: 420px; }
+        .modalRoot_b824c5 { position: relative; z-index: 20; height: 100%; background: #222; }
+        .videoCont_b824c5 video { width: 500px; height: 280px; }
+    ` });
+    const point = await page.evaluate(async () => {
+        const video = document.getElementById("quest-video");
+        delete video.play;
+        const canvas = document.createElement("canvas");
+        canvas.width = 320;
+        canvas.height = 180;
+        const context = canvas.getContext("2d");
+        const draw = () => {
+            context.fillStyle = `hsl(${performance.now() / 10 % 360} 100% 50%)`;
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            requestAnimationFrame(draw);
+        };
+        draw();
+        video.srcObject = canvas.captureStream(30);
+        video.muted = true;
+        await video.play();
+        questHarness.default.start();
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const button = document.querySelector("[aria-label='Minimize quest video']");
+        const bounds = button.getBoundingClientRect();
+        const x = bounds.x + bounds.width / 2;
+        const y = bounds.y + bounds.height / 2;
+        if (document.elementFromPoint(x, y) !== button) throw new Error("Discord's stacked controls intercept the minimize button hit target");
+        return { x, y };
+    });
+    await page.mouse.click(point.x, point.y);
+    await page.waitForSelector(".vc-quest-mini-player", { visible: true, timeout: 2000 });
+    await page.evaluate(async () => {
+        const video = document.getElementById("quest-video");
+        const bounds = video.getBoundingClientRect();
+        if (document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2) !== video)
+            throw new Error("Minimized video must remain visible and hit-testable");
+        const time = video.currentTime;
+        await new Promise(resolve => video.requestVideoFrameCallback(resolve));
+        if (video.paused || video.currentTime <= time) throw new Error("Minimized video must continue producing playback frames");
+    });
+    const restore = await page.$(".vc-quest-mini-player button");
+    await restore.click();
+    await page.evaluate(() => {
+        const video = document.getElementById("quest-video");
+        if (document.querySelector(".vc-quest-mini-player") || video.style.position !== "")
+            throw new Error("Real pointer restore must recover the original quest video");
+        questHarness.default.stop();
+        video.srcObject.getTracks().forEach(track => track.stop());
+    });
+    console.log("Pointer hit-testing and real minimized playback-frame regressions passed.");
+} finally {
+    await browser.close();
+}

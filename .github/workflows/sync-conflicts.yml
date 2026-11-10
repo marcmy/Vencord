@@ -1,0 +1,66 @@
+name: Sync conflicts
+
+on:
+    push:
+        branches:
+            - upstream-sync
+
+permissions:
+    contents: write
+
+concurrency:
+    group: sync-conflicts
+    cancel-in-progress: true
+
+jobs:
+    resolve:
+        if: github.repository == 'marcmy/Vencord'
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Check out upstream-sync
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  fetch-depth: 0
+                  # Pushes made with GITHUB_TOKEN don't trigger the pull request's CI
+                  token: ${{ secrets.SYNC_TOKEN || github.token }}
+
+            - name: Check for conflict markers
+              shell: bash
+              run: |
+                  mapfile -d '' -t changed < <(git diff -z --name-only --diff-filter=AMR origin/custom-plugins HEAD)
+                  remaining=()
+                  if [[ ${#changed[@]} -gt 0 ]]; then
+                      mapfile -t remaining < <(grep -lE '^(<{7}|>{7})( |$)' -- "${changed[@]}" || true)
+                  fi
+
+                  if [[ ${#remaining[@]} -gt 0 ]]; then
+                      echo "### Conflict markers remain" >> "$GITHUB_STEP_SUMMARY"
+                      for file in "${remaining[@]}"; do
+                          echo "::error file=$file::Conflict markers remain"
+                          echo "- \`$file\`" >> "$GITHUB_STEP_SUMMARY"
+                      done
+                      exit 1
+                  fi
+
+            - name: Set up pnpm
+              uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+            - name: Use Node.js 24
+              uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24
+
+            - name: Regenerate pnpm-lock.yaml
+              shell: bash
+              run: |
+                  pnpm install --lockfile-only
+                  if git diff --quiet -- pnpm-lock.yaml; then
+                      echo "pnpm-lock.yaml is up to date."
+                      exit 0
+                  fi
+
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git commit -m "chore: regenerate pnpm-lock.yaml" -- pnpm-lock.yaml
+                  git push origin HEAD:upstream-sync

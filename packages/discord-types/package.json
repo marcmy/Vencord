@@ -13,10 +13,10 @@
     "type": "module",
     "types": "src/index.d.ts",
     "dependencies": {
-        "moment": "catalog:",
-        "type-fest": "catalog:"
+        "moment": "2.31.0",
+        "type-fest": "^5.10.0"
     },
     "peerDependencies": {
-        "@types/react": "catalog:"
+        "@types/react": "^19.1.0"
     }
 }
