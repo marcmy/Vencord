@@ -12,7 +12,7 @@ updates:
       ignore:
           # TypeScript 7 drops the JS compiler API used by generatePluginList, ts-patch and typescript-transform-paths
           - dependency-name: "typescript"
-            update-types: ["version-update:semver-major"]
+            versions: ["7.x"]
 
     - package-ecosystem: "github-actions"
       directory: "/"
