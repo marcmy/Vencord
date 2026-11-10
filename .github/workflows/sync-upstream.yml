@@ -24,6 +24,8 @@ jobs:
               with:
                   ref: custom-plugins
                   fetch-depth: 0
+                  # GITHUB_TOKEN cannot push upstream changes to .github/workflows
+                  token: ${{ secrets.SYNC_TOKEN || github.token }}
 
             - name: Fetch upstream
               run: |
@@ -74,7 +76,7 @@ jobs:
               if: steps.merge.outputs.ready == 'false'
               shell: bash
               env:
-                  GH_TOKEN: ${{ github.token }}
+                  GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
               run: |
                   set -euo pipefail
                   branch=upstream-sync
