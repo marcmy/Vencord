@@ -16,6 +16,7 @@ jobs:
     resolve:
         if: github.repository == 'marcmy/Vencord'
         runs-on: ubuntu-latest
+        environment: upstream-sync
 
         steps:
             - name: Check out upstream-sync
