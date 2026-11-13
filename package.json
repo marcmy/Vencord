@@ -66,7 +66,7 @@
         "moment": "^2.31.0",
         "oxfmt": "^0.76.0",
         "oxlint": "^1.90.0",
-        "oxlint-tsgolint": "^7.0.2005",
+        "oxlint-tsgolint": "^7.0.2006",
         "p-limit": "^7.3.3",
         "puppeteer-core": "^25.16.0",
         "standalone-electron-types": "^41.2.1",
