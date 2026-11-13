@@ -64,7 +64,7 @@
         "html-minifier-terser": "^7.2.0",
         "lodash": "^4.18.1",
         "moment": "^2.31.0",
-        "oxfmt": "^0.76.0",
+        "oxfmt": "^0.77.0",
         "oxlint": "^1.90.0",
         "oxlint-tsgolint": "^7.0.2006",
         "p-limit": "^7.3.3",
