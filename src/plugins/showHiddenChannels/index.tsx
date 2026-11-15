@@ -193,14 +193,6 @@ export default definePlugin({
             ]
         },
         {
-            // Filter rows at render time so voice-state and read-state changes update the sidebar.
-            find: "UNREAD_IMPORTANT:",
-            replacement: {
-                match: /Children\.count.+?;(?=return\(0,\i\.jsxs?\)\(\i\.\i,{focusTarget:)(?<={channel:(\i),name:\i,.+?)/,
-                replace: (m, channel) => `${m}if($self.useShouldFilterHiddenChannel(${channel}))return null;`
-            }
-        },
-        {
             find: "UNREAD_IMPORTANT:",
             replacement: [
                 {
@@ -216,6 +208,14 @@ export default definePlugin({
                     replace: (m, channel, unread) => `${m}${unread}=$self.isHiddenChannel(${channel})?false:${unread};`
                 }
             ]
+        },
+        {
+            // Filter rows at render time so voice-state and read-state changes update the sidebar.
+            find: "UNREAD_IMPORTANT:",
+            replacement: {
+                match: /Children\.count.+?;(?=return\(0,\i\.jsxs?\)\(\i\.\i,{focusTarget:)(?<={channel:(\i),name:\i,.+?)/,
+                replace: (m, channel) => `${m}if($self.useShouldFilterHiddenChannel(${channel}))return null;`
+            }
         },
         {
             // Hide the new version of unreads box for hidden channels
