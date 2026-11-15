@@ -45,8 +45,7 @@ export const settings = definePluginSettings({
     hideUnreads: {
         description: "Hide Unreads",
         type: OptionType.BOOLEAN,
-        default: true,
-        restartNeeded: true
+        default: true
     },
     onlyActiveHiddenVoiceChannels: {
         description: "Only show hidden voice/stage channels when Discord reports someone connected. Channels without available voice-state data stay hidden.",
