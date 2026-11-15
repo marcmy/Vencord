@@ -54,7 +54,7 @@ export const settings = definePluginSettings({
         default: false
     },
     onlyUnreadHiddenTextChannels: {
-        description: "Only show hidden text channels with tracked unread activity. Requires Hide Unreads; Discord may not report activity for inaccessible channels.",
+        description: "Hide all hidden text/announcement channels when Hide Unreads is enabled. When disabled, show only hidden text channels with unread activity. Other text channels are unaffected.",
         type: OptionType.BOOLEAN,
         default: false
     },
@@ -546,8 +546,8 @@ export default definePlugin({
             }
 
             // GUILD_TEXT and GUILD_ANNOUNCEMENT; other types remain visible.
-            if (hideUnreads && onlyUnreadHiddenTextChannels && (channel.type === 0 || channel.type === 5)) {
-                return !ReadStateStore.hasUnreadOrMentions(channel.id);
+            if (onlyUnreadHiddenTextChannels && (channel.type === 0 || channel.type === 5)) {
+                return hideUnreads || !ReadStateStore.hasUnreadOrMentions(channel.id);
             }
 
             return false;
