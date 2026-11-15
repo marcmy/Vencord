@@ -26,7 +26,7 @@ import { classes } from "@utils/misc";
 import definePlugin, { OptionType } from "@utils/types";
 import type { Channel, Role } from "@vencord/discord-types";
 import { findCssClassesLazy } from "@webpack";
-import { ChannelStore, PermissionsBits, PermissionStore, Tooltip } from "@webpack/common";
+import { ChannelStore, PermissionsBits, PermissionStore, ReadStateStore, Tooltip, useStateFromStores, VoiceStateStore } from "@webpack/common";
 
 import HiddenChannelLockScreen, { setChannelBeginHeader } from "./components/HiddenChannelLockScreen";
 
@@ -47,6 +47,16 @@ export const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         default: true,
         restartNeeded: true
+    },
+    onlyActiveHiddenVoiceChannels: {
+        description: "Only show hidden voice/stage channels when Discord reports someone connected. Channels without available voice-state data stay hidden.",
+        type: OptionType.BOOLEAN,
+        default: false
+    },
+    onlyUnreadHiddenTextChannels: {
+        description: "Only show hidden text channels with tracked unread activity. Requires Hide Unreads; Discord may not report activity for inaccessible channels.",
+        type: OptionType.BOOLEAN,
+        default: false
     },
     showMode: {
         description: "The mode used to display hidden channels.",
@@ -198,6 +208,14 @@ export default definePlugin({
                     replace: (m, channel, unread) => `${m}${unread}=$self.isHiddenChannel(${channel})?false:${unread};`
                 }
             ]
+        },
+        {
+            // Filter rows at render time so voice-state and read-state changes update the sidebar.
+            find: "UNREAD_IMPORTANT:",
+            replacement: {
+                match: /Children\.count.+?;(?=return\(0,\i\.jsxs?\)\(\i\.\i,{focusTarget:)(?<={channel:(\i),name:\i,.+?)/,
+                replace: (m, channel) => `${m}if($self.useShouldFilterHiddenChannel(${channel}))return null;`
+            }
         },
         {
             // Hide the new version of unreads box for hidden channels
@@ -514,6 +532,26 @@ export default definePlugin({
             console.error("[ViewHiddenChannels#isHiddenChannel]: ", e);
             return false;
         }
+    },
+
+    useShouldFilterHiddenChannel(channel: Channel) {
+        const { onlyActiveHiddenVoiceChannels, onlyUnreadHiddenTextChannels, hideUnreads } = settings.use(["onlyActiveHiddenVoiceChannels", "onlyUnreadHiddenTextChannels", "hideUnreads"]);
+
+        return useStateFromStores([VoiceStateStore, ReadStateStore], () => {
+            if (!channel || !this.isHiddenChannel(channel)) return false;
+
+            // GUILD_VOICE and GUILD_STAGE_VOICE
+            if (onlyActiveHiddenVoiceChannels && (channel.type === 2 || channel.type === 13)) {
+                return Object.keys(VoiceStateStore.getVoiceStatesForChannel(channel.id) ?? {}).length === 0;
+            }
+
+            // GUILD_TEXT and GUILD_ANNOUNCEMENT; other types remain visible.
+            if (hideUnreads && onlyUnreadHiddenTextChannels && (channel.type === 0 || channel.type === 5)) {
+                return !ReadStateStore.hasUnreadOrMentions(channel.id);
+            }
+
+            return false;
+        });
     },
 
     resolveGuildChannels(channels: Record<string | number, Array<{ channel: Channel; comparator: number; }> | string | number>, shouldIncludeHidden: boolean) {
