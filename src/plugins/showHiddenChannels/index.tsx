@@ -54,7 +54,8 @@ export const settings = definePluginSettings({
         default: false
     },
     onlyUnreadHiddenTextChannels: {
-        description: "Hide all hidden text/announcement channels when Hide Unreads is enabled. When disabled, show only hidden text channels with unread activity. Other text channels are unaffected.",
+        displayName: "Filter Hidden Text Channels",
+        description: "When Hide Unreads is enabled, hide all hidden text/announcement channels. When it is disabled, show only hidden text/announcement channels with unread activity. Visible channels are unaffected.",
         type: OptionType.BOOLEAN,
         default: false
     },
