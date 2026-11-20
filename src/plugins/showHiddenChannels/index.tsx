@@ -45,6 +45,9 @@ const enum ShowMode {
 
 const CONNECT = 1n << 20n;
 
+// Discord substitutes this name before sending inaccessible channels to the client.
+const REDACTED_NAME = "___hidden___";
+
 export const settings = definePluginSettings({
     hideUnreads: {
         description: "Hide Unreads",
@@ -75,6 +78,11 @@ export const settings = definePluginSettings({
         description: "Whether the allowed users and roles dropdown on hidden channels should be open by default",
         type: OptionType.BOOLEAN,
         default: true
+    },
+    hiddenChannelName: {
+        description: "Name shown for hidden channels, whose real name Discord no longer sends",
+        type: OptionType.STRING,
+        default: "hidden"
     }
 });
 
@@ -84,21 +92,24 @@ function isUncategorized(objChannel: { channel: Channel; comparator: number; }) 
 
 export default definePlugin({
     name: "ShowHiddenChannels",
-    description: "THIS PLUGIN IS DEAD! Discord patched it. See the plugin settings for more information.",
+    description: "Show restricted channel placeholders, positions and voice occupants; Discord redacts their names and metadata server-side.",
     tags: ["Servers", "Utility"],
-    authors: [Devs.BigDuck, Devs.AverageReactEnjoyer, Devs.D3SOX, Devs.Ven, Devs.Nuckyz, Devs.Nickyux, Devs.Rini],
+    // November 2026 redaction support adapted from CyberKird/showHiddenChannelsLite (GPL-3.0).
+    authors: [Devs.BigDuck, Devs.AverageReactEnjoyer, Devs.D3SOX, Devs.Ven, Devs.Nuckyz, Devs.Rini],
     settings,
 
     settingsAboutComponent() {
         return (
-            <Card variant="danger">
+            <Card variant="warning">
                 <Flex flexDirection="column" gap="0.5em">
-                    <Heading tag="h3">Plugin Deprecated</Heading>
+                    <Heading tag="h3">Reduced functionality</Heading>
                     <Paragraph>
-                        Discord patched this plugin, it's no longer possible to see hidden channels. All channels will instead show up as "No Access"!
+                        Discord now strips hidden channels on the server: their name arrives as "{REDACTED_NAME}", the topic is empty
+                        and the permission overwrites are replaced with a fake one. No client patch can bring that back.
                     </Paragraph>
                     <Paragraph>
-                        There is nothing we can do to fix it, so the plugin will be removed soon.
+                        What still works: hidden channels stay in the list at their real position and category, with their real type,
+                        and you can see who is sitting in a hidden voice channel.
                     </Paragraph>
                 </Flex>
             </Card>
@@ -129,6 +140,11 @@ export default definePlugin({
                 {
                     match: /(getRenderLevel\(\i\){.+?return)!\i\.\i\.can\(\i\.\i\.VIEW_CHANNEL,this\.record\)\|\|/,
                     replace: (_, rest) => `${rest} `
+                },
+                // Hidden channels can never be opted into, so servers with onboarding would never show them
+                {
+                    match: /(?<=!(\i)\.optInEnabled\|\|)(?=\1\.optedInChannels\.has\(this\.id\))/,
+                    replace: "$self.isHiddenChannel(this.record)||"
                 }
             ]
         },
@@ -180,6 +196,14 @@ export default definePlugin({
             replacement: {
                 match: /(?<=renderOpenChatButton(?:",|=)\(\)=>{)/,
                 replace: "if($self.isHiddenChannel(this?.props?.channel))return null;"
+            }
+        },
+        {
+            // Discord sends "___hidden___" as the name of every channel we cannot view, show something readable instead
+            find: "UNREAD_IMPORTANT:",
+            replacement: {
+                match: /(?<=channel:(\i),name:)null!=\i\?\i:\i/,
+                replace: (m, channel) => `$self.getChannelName(${channel},${m})`
             }
         },
         {
@@ -528,6 +552,15 @@ export default definePlugin({
 
     set ChannelBeginHeader(value: any) {
         setChannelBeginHeader(value);
+    },
+
+    getChannelName(channel: Channel, name: string) {
+        try {
+            if (channel?.name !== REDACTED_NAME && name !== REDACTED_NAME) return name;
+            return settings.store.hiddenChannelName || "hidden";
+        } catch {
+            return name;
+        }
     },
 
     swapViewChannelWithConnectPermission(mergedPermissions: bigint, channel: Channel) {
