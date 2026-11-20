@@ -28,7 +28,7 @@ import { classes } from "@utils/misc";
 import { formatDurationVerbose } from "@utils/text";
 import type { Channel, RoleOrUserPermission } from "@vencord/discord-types";
 import { findByPropsLazy, findComponentByCodeLazy, findCssClassesLazy } from "@webpack";
-import { EmojiStore, FluxDispatcher, GuildMemberStore, GuildStore, Parser, PermissionsBits, PermissionStore, SnowflakeUtils, Timestamp, Tooltip, useEffect, UserStore, useState, useStateFromStores, VoiceStateStore } from "@webpack/common";
+import { EmojiStore, FluxDispatcher, GuildMemberStore, GuildStore, Parser, PermissionsBits, PermissionStore, SnowflakeUtils, Timestamp, Tooltip, UserStore, useEffect, useState, useStateFromStores, VoiceStateStore } from "@webpack/common";
 import { ComponentType } from "react";
 
 const enum SortOrderTypes {
@@ -125,7 +125,7 @@ function HiddenChannelLockScreen({ channel }: { channel: Channel; }) {
     const isHidden = !PermissionStore.can(PermissionsBits.VIEW_CHANNEL, channel);
 
     const connectedMembers = useStateFromStores([VoiceStateStore, GuildMemberStore, UserStore], () => {
-        if (!isHidden || (type !== ChannelTypes.GUILD_VOICE && type !== ChannelTypes.GUILD_STAGE_VOICE)) return [];
+        if (!isHidden || !(channel.isGuildVoice() || channel.isGuildStageVoice())) return [];
 
         return Object.values(VoiceStateStore.getVoiceStatesForChannel(channelId) ?? {})
             .map((voiceState: any) => {
