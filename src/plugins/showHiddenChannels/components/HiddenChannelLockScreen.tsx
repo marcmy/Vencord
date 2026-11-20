@@ -28,7 +28,7 @@ import { classes } from "@utils/misc";
 import { formatDurationVerbose } from "@utils/text";
 import type { Channel, RoleOrUserPermission } from "@vencord/discord-types";
 import { findByPropsLazy, findComponentByCodeLazy, findCssClassesLazy } from "@webpack";
-import { EmojiStore, FluxDispatcher, GuildMemberStore, GuildStore, Parser, PermissionsBits, PermissionStore, SnowflakeUtils, Timestamp, Tooltip, useEffect, useState } from "@webpack/common";
+import { EmojiStore, FluxDispatcher, GuildMemberStore, GuildStore, Parser, PermissionsBits, PermissionStore, SnowflakeUtils, Timestamp, Tooltip, useEffect, UserStore, useState, useStateFromStores, VoiceStateStore } from "@webpack/common";
 import { ComponentType } from "react";
 
 const enum SortOrderTypes {
@@ -120,7 +120,27 @@ function HiddenChannelLockScreen({ channel }: { channel: Channel; }) {
         guild_id
     } = channel;
 
+    // Discord redacts the name, topic and permission overwrites of channels we cannot view,
+    // so everything derived from them is only trustworthy on locked (but visible) channels
+    const isHidden = !PermissionStore.can(PermissionsBits.VIEW_CHANNEL, channel);
+
+    const connectedMembers = useStateFromStores([VoiceStateStore, GuildMemberStore, UserStore], () => {
+        if (!isHidden || !(channel.isGuildVoice() || channel.isGuildStageVoice())) return [];
+
+        return Object.values(VoiceStateStore.getVoiceStatesForChannel(channelId) ?? {})
+            .map((voiceState: any) => {
+                const userId = voiceState?.userId;
+                if (userId == null) return null;
+                return GuildMemberStore.getNick(guild_id, userId)
+                    ?? UserStore.getUser(userId)?.username
+                    ?? userId;
+            })
+            .filter((name): name is string => name != null);
+    });
+
     useEffect(() => {
+        if (isHidden) return;
+
         const membersToFetch: Array<string> = [];
 
         const guildOwnerId = GuildStore.getGuild(guild_id)?.ownerId;
@@ -254,7 +274,19 @@ function HiddenChannelLockScreen({ channel }: { channel: Channel; }) {
                         </div>
                     </div>
                 }
-                <div className={cl("allowed-users-and-roles-container")}>
+                {isHidden && (
+                    <Paragraph size="md">
+                        Discord no longer sends the name, topic or allowed roles of channels you cannot view.
+                    </Paragraph>
+                )}
+
+                {isHidden && connectedMembers.length > 0 && (
+                    <Paragraph size="md">
+                        Currently connected: {connectedMembers.join(", ")}
+                    </Paragraph>
+                )}
+
+                {!isHidden && <div className={cl("allowed-users-and-roles-container")}>
                     <div className={cl("allowed-users-and-roles-container-title")}>
                         {isPluginEnabled(PermissionsViewerPlugin.name) && (
                             <Tooltip text="Permission Details">
@@ -298,7 +330,7 @@ function HiddenChannelLockScreen({ channel }: { channel: Channel; }) {
                         </Tooltip>
                     </div>
                     {defaultAllowedUsersAndRolesDropdownState && <ChannelBeginHeader channel={channel} />}
-                </div>
+                </div>}
             </div>
         </div>
     );
