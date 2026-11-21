@@ -3,6 +3,7 @@ on:
     push:
     pull_request:
         branches:
+            - custom-plugins
             - main
             - dev
 permissions:

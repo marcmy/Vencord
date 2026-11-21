@@ -700,8 +700,8 @@ export function mapMangledModuleLazy<S extends string>(code: string | RegExp | C
     return proxyLazy(() => mapMangledModule(code, mappers, includeBlacklistedExports));
 }
 
-export const DefaultExtractAndLoadChunksRegex = /(?:(?:Promise\.all\(\[)?((?:\i\.e\("?[^)]+?"?\),?)+?)(?:\]\))?|Promise\.resolve\(\))\.then\(\i\.bind\(\i,"?([^)]+?)"?(?:,[^)]+?)?\)\)/;
-const ChunkIdsRegex = /\((?:"([^"]+?)"|([\de]+?))\)/g;
+export const DefaultExtractAndLoadChunksRegex = /(?:(?:Promise\.all\(\[)?(\i\.e\([^)]*\)(?:,\i\.e\([^)]*\))*)(?:\]\))?|Promise\.resolve\(\))\.then\(\i\.bind\(\i,"?([^",)]+)"?(?:,[^)]+?)?\)\)/;
+export const ChunkIdsRegex = /\((?:"([^"]+?)"|([\de]+?))\)/g;
 
 export function parseChunkIds(rawChunkIds: string): Array<string | number> {
     return Array.from(rawChunkIds.matchAll(ChunkIdsRegex), m => m[1] ?? Number(m[2]));

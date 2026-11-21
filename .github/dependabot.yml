@@ -1,0 +1,25 @@
+version: 2
+updates:
+    - package-ecosystem: "npm"
+      directory: "/"
+      schedule:
+          interval: "daily"
+          time: "12:00"
+          timezone: "America/New_York"
+      open-pull-requests-limit: 100
+      cooldown:
+          default-days: 7
+      ignore:
+          # TypeScript 7 drops the JS compiler API used by generatePluginList, ts-patch and typescript-transform-paths
+          - dependency-name: "typescript"
+            versions: ["7.x"]
+
+    - package-ecosystem: "github-actions"
+      directory: "/"
+      schedule:
+          interval: "daily"
+          time: "12:00"
+          timezone: "America/New_York"
+      open-pull-requests-limit: 100
+      cooldown:
+          default-days: 7
