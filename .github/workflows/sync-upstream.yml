@@ -181,7 +181,7 @@ jobs:
                   # Otherwise gh targets the "upstream" remote (Vendicated/Vencord)
                   GH_REPO: ${{ github.repository }}
                   MERGE_READY: ${{ steps.merge.outputs.ready }}
-                  SYNC_FAILED: ${{ failure() }}
+                  SYNC_FAILED: ${{ job.status == 'failure' }}
                   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
               run: |
                   set -euo pipefail
