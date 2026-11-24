@@ -25,6 +25,7 @@
             "@api/*": ["./src/api/*"],
             "@components/*": ["./src/components/*"],
             "@debug/*": ["./src/debug/*"],
+            "@utils/constants": ["./src/utils/constants.custom.ts"],
             "@utils/*": ["./src/utils/*"],
             "@plugins/*": ["./src/plugins/*"],
             "@shared/*": ["./src/shared/*"],

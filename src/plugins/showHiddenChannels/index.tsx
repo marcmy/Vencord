@@ -31,7 +31,7 @@ import { classes } from "@utils/misc";
 import definePlugin, { OptionType } from "@utils/types";
 import type { Channel } from "@vencord/discord-types";
 import { findCssClassesLazy } from "@webpack";
-import { ChannelStore, PermissionsBits, PermissionStore, Tooltip } from "@webpack/common";
+import { ChannelStore, PermissionsBits, PermissionStore, ReadStateStore, Tooltip, useStateFromStores, VoiceStateStore } from "@webpack/common";
 
 import HiddenChannelLockScreen from "./components/HiddenChannelLockScreen";
 
@@ -44,7 +44,27 @@ const enum ShowMode {
     HiddenIconWithMutedStyle
 }
 
+// Discord substitutes this name before sending inaccessible channels to the client.
+const REDACTED_NAME = "___hidden___";
+
 export const settings = definePluginSettings({
+    hideUnreads: {
+        description: "Hide Unreads",
+        type: OptionType.BOOLEAN,
+        default: true
+    },
+    onlyActiveHiddenVoiceChannels: {
+        description: "Only show hidden voice/stage channels when Discord reports someone connected. Channels without available voice-state data stay hidden.",
+        type: OptionType.BOOLEAN,
+        default: false
+    },
+    onlyUnreadHiddenTextChannels: {
+        displayName: "Filter Hidden Text Channels",
+        description: "When Hide Unreads is enabled, hide all hidden text/announcement channels. When it is disabled, show only hidden text/announcement channels with unread activity. Visible channels are unaffected.",
+        type: OptionType.BOOLEAN,
+        default: false
+    },
+
     showMode: {
         description: "The mode used to display hidden channels.",
         type: OptionType.SELECT,
@@ -53,6 +73,11 @@ export const settings = definePluginSettings({
             { label: "Muted style with hidden eye icon on the right", value: ShowMode.HiddenIconWithMutedStyle },
         ],
         restartNeeded: true
+    },
+    hiddenChannelName: {
+        description: "Name shown for hidden channels, whose real name Discord no longer sends",
+        type: OptionType.STRING,
+        default: "hidden"
     }
 });
 
@@ -94,6 +119,11 @@ export default definePlugin({
                     match: /if\(!\i\.\i\.can\(\i\.\i\.VIEW_CHANNEL.+?{if\(this\.id===\i\).+?threadIds:\[\]}}/,
                     replace: ""
                 },
+                // Do not check for unreads when selecting the render level if the channel is hidden
+                {
+                    match: /(?<=&&)(?=!\i\.\i\.hasUnread\(this\.record\.id\))/,
+                    replace: "$self.isHiddenChannel(this.record)||"
+                },
                 // Make channels we dont have access to be the same level as normal ones
                 {
                     match: /(this\.record\)\?{renderLevel:(.+?),threadIds.+?renderLevel:).+?(?=,threadIds)/g,
@@ -103,6 +133,11 @@ export default definePlugin({
                 {
                     match: /(getRenderLevel\(\i\){.+?return)!\i\.\i\.can\(\i\.\i\.VIEW_CHANNEL,this\.record\)\|\|/,
                     replace: (_, rest) => `${rest} `
+                },
+                // Hidden channels can never be opted into, so servers with onboarding would never show them
+                {
+                    match: /(?<=!(\i)\.optInEnabled\|\|)(?=\1\.optedInChannels\.has\(this\.id\))/,
+                    replace: "$self.isHiddenChannel(this.record)||"
                 }
             ]
         },
@@ -157,6 +192,14 @@ export default definePlugin({
             }
         },
         {
+            // Discord sends "___hidden___" as the name of every channel we cannot view, show something readable instead
+            find: "UNREAD_IMPORTANT:",
+            replacement: {
+                match: /(?<=channel:(\i),name:)null!=\i\?\i:\i/,
+                replace: (m, channel) => `$self.getChannelName(${channel},${m})`
+            }
+        },
+        {
             find: "#{intl::CHANNEL_TOOLTIP_DIRECTORY}",
             predicate: () => settings.store.showMode === ShowMode.LockIcon,
             replacement: {
@@ -185,6 +228,31 @@ export default definePlugin({
                     replace: (_, otherClasses, isMuted, mutedClassExpression) => `${isMuted}?${mutedClassExpression}:"",${otherClasses}if(${isMuted})return ""`
                 }
             ]
+        },
+        {
+            find: "UNREAD_IMPORTANT:",
+            replacement: [
+                {
+                    // Make muted channels also appear as unread if hide unreads is false, using the HiddenIconWithMutedStyle and the channel is hidden
+                    predicate: () => settings.store.hideUnreads === false && settings.store.showMode === ShowMode.HiddenIconWithMutedStyle,
+                    match: /(?<=\.LOCKED;if\()(?<={channel:(\i).+?)/,
+                    replace: (_, channel) => `!$self.isHiddenChannel(${channel})&&`
+                },
+                {
+                    // Hide unreads
+                    predicate: () => settings.store.hideUnreads === true,
+                    match: /Children\.count.+?;(?=return\(0,\i\.jsxs?\)\(\i\.\i,{focusTarget:)(?<={channel:(\i),name:\i,.+?unread:(\i).+?)/,
+                    replace: (m, channel, unread) => `${m}${unread}=$self.isHiddenChannel(${channel})?false:${unread};`
+                }
+            ]
+        },
+        {
+            // Filter rows at render time so voice-state and read-state changes update the sidebar.
+            find: "UNREAD_IMPORTANT:",
+            replacement: {
+                match: /Children\.count.+?;(?=return\(0,\i\.jsxs?\)\(\i\.\i,{focusTarget:)(?<={channel:(\i),name:\i,.+?)/,
+                replace: (m, channel) => `${m}if($self.useShouldFilterHiddenChannel(${channel}))return null;`
+            }
         },
         {
             // Hide the new version of unreads box for hidden channels
@@ -399,6 +467,15 @@ export default definePlugin({
         }
     ],
 
+    getChannelName(channel: Channel, name: string) {
+        try {
+            if (channel?.name !== REDACTED_NAME && name !== REDACTED_NAME) return name;
+            return settings.store.hiddenChannelName || "hidden";
+        } catch {
+            return name;
+        }
+    },
+
     isHiddenChannel(channel: Channel & { channelId?: string; }, checkConnect = false) {
         try {
             if (channel == null || Object.hasOwn(channel, "channelId") && channel.channelId == null) return false;
@@ -412,6 +489,26 @@ export default definePlugin({
             console.error("[ViewHiddenChannels#isHiddenChannel]: ", e);
             return false;
         }
+    },
+
+    useShouldFilterHiddenChannel(channel: Channel) {
+        const { onlyActiveHiddenVoiceChannels, onlyUnreadHiddenTextChannels, hideUnreads } = settings.use(["onlyActiveHiddenVoiceChannels", "onlyUnreadHiddenTextChannels", "hideUnreads"]);
+
+        return useStateFromStores([VoiceStateStore, ReadStateStore], () => {
+            if (!channel || !this.isHiddenChannel(channel)) return false;
+
+            // GUILD_VOICE and GUILD_STAGE_VOICE
+            if (onlyActiveHiddenVoiceChannels && (channel.type === 2 || channel.type === 13)) {
+                return Object.keys(VoiceStateStore.getVoiceStatesForChannel(channel.id) ?? {}).length === 0;
+            }
+
+            // GUILD_TEXT and GUILD_ANNOUNCEMENT; other types remain visible.
+            if (onlyUnreadHiddenTextChannels && (channel.type === 0 || channel.type === 5)) {
+                return hideUnreads || !ReadStateStore.hasUnreadOrMentions(channel.id);
+            }
+
+            return false;
+        });
     },
 
     resolveGuildChannels(channels: Record<string | number, Array<{ channel: Channel; comparator: number; }> | string | number>, shouldIncludeHidden: boolean) {

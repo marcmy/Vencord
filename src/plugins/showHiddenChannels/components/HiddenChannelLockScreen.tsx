@@ -25,7 +25,7 @@ import { formatDurationVerbose } from "@utils/text";
 import type { Channel } from "@vencord/discord-types";
 import { ChannelType } from "@vencord/discord-types/enums";
 import { findCssClassesLazy } from "@webpack";
-import { PermissionsBits, PermissionStore } from "@webpack/common";
+import { GuildMemberStore, PermissionsBits, PermissionStore, UserStore, useStateFromStores, VoiceStateStore } from "@webpack/common";
 
 const enum SortOrderTypes {
     LATEST_ACTIVITY = 0,
@@ -80,6 +80,8 @@ const HiddenChannelLogo = "/assets/433e3ec4319a9d11b0cbe39342614982.svg";
 function HiddenChannelLockScreen({ channel }: { channel: Channel; }) {
     const {
         type,
+        id: channelId,
+        guild_id,
         defaultForumLayout,
         defaultAutoArchiveDuration,
         rateLimitPerUser,
@@ -89,6 +91,24 @@ function HiddenChannelLockScreen({ channel }: { channel: Channel; }) {
         rtcRegion,
         videoQualityMode
     } = channel;
+
+    // Discord redacts the name, topic and permission overwrites of channels we cannot view,
+    // so everything derived from them is only trustworthy on locked (but visible) channels
+    const isHidden = !PermissionStore.can(PermissionsBits.VIEW_CHANNEL, channel);
+
+    const connectedMembers = useStateFromStores([VoiceStateStore, GuildMemberStore, UserStore], () => {
+        if (!isHidden || !(channel.isGuildVoice() || channel.isGuildStageVoice())) return [];
+
+        return Object.values(VoiceStateStore.getVoiceStatesForChannel(channelId) ?? {})
+            .map((voiceState: any) => {
+                const userId = voiceState?.userId;
+                if (userId == null) return null;
+                return GuildMemberStore.getNick(guild_id, userId)
+                    ?? UserStore.getUser(userId)?.username
+                    ?? userId;
+            })
+            .filter((name): name is string => name != null);
+    });
 
     return (
         <div className={classes(ChatScrollClasses.auto, ChatScrollClasses.customTheme, ChatScrollClasses.managedReactiveScroller)}>
@@ -137,6 +157,11 @@ function HiddenChannelLockScreen({ channel }: { channel: Channel; }) {
                 {channel.hasFlag(ChannelFlags.REQUIRE_TAG) &&
                     <Paragraph size="md">Posts on this forum require a tag to be set.</Paragraph>
                 }
+                {isHidden && connectedMembers.length > 0 && (
+                    <Paragraph size="md">
+                        Currently connected: {connectedMembers.join(", ")}
+                    </Paragraph>
+                )}
             </div>
         </div>
     );

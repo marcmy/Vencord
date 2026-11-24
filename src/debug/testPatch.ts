@@ -49,9 +49,13 @@ export function previewPatchReplacement(
     return { canonicalMatch, patchedSource };
 }
 
-function checkPatchReplacement(source: string, patchedSource: string) {
+function checkPatchReplacement(source: string, patchedSource: string, maxSourceLength?: number) {
     if (source === patchedSource) {
         return "Had no effect";
+    }
+
+    if (maxSourceLength != null && patchedSource.length > maxSourceLength) {
+        return "Patched module source is too long";
     }
 
     try {
@@ -61,14 +65,14 @@ function checkPatchReplacement(source: string, patchedSource: string) {
     }
 }
 
-export function testPatchReplacements(source: string, replacements: PatchReplacement[], plugin?: string) {
+export function testPatchReplacements(source: string, replacements: PatchReplacement[], plugin?: string, maxSourceLength?: number) {
     let patchedSource = source;
 
     for (const [index, replacement] of replacements.entries()) {
         const label = `Replacement ${index + 1} failed: `;
         try {
             const { patchedSource: nextSource } = previewPatchReplacement(patchedSource, replacement, plugin);
-            const error = checkPatchReplacement(patchedSource, nextSource);
+            const error = checkPatchReplacement(patchedSource, nextSource, maxSourceLength);
             if (error) {
                 return { ok: false as const, error: label + error };
             }
@@ -81,7 +85,7 @@ export function testPatchReplacements(source: string, replacements: PatchReplace
     return { ok: true as const, patchedSource };
 }
 
-export function testPatch({ find, replacement, plugin }: Pick<Patch, "find" | "replacement"> & Partial<Pick<Patch, "plugin">>) {
+export function testPatch({ find, replacement, plugin }: Pick<Patch, "find" | "replacement"> & Partial<Pick<Patch, "plugin">>, maxSourceLength?: number) {
     if (!find || (typeof find !== "string" && !(find instanceof RegExp))) {
         return { ok: false as const, error: "Expected a string or RegExp in 'find'" };
     }
@@ -97,6 +101,6 @@ export function testPatch({ find, replacement, plugin }: Pick<Patch, "find" | "r
     }
 
     const { moduleId, source } = result.target;
-    const check = testPatchReplacements(source, replacements, plugin);
+    const check = testPatchReplacements(source, replacements, plugin, maxSourceLength);
     return check.ok ? { ...check, moduleId } : check;
 }
