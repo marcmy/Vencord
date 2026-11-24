@@ -53,7 +53,7 @@ importers:
     devDependencies:
       '@stylistic/eslint-plugin':
         specifier: ^6.0.1
-        version: 6.0.1(oxlint@1.93.0(oxlint-tsgolint@7.0.2007))
+        version: 6.0.1(oxlint@1.94.0(oxlint-tsgolint@7.0.2007))
       '@types/chrome':
         specifier: ^0.3.7
         version: 0.3.7
@@ -1573,7 +1573,7 @@ snapshots:
       modern-tar: 0.8.6
       yargs: 18.2.0
 
-  '@stylistic/eslint-plugin@6.0.1(oxlint@1.93.0(oxlint-tsgolint@7.0.2007))':
+  '@stylistic/eslint-plugin@6.0.1(oxlint@1.94.0(oxlint-tsgolint@7.0.2007))':
     dependencies:
       '@eslint-community/eslint-utils': 4.10.1
       '@typescript-eslint/types': 8.72.2
@@ -1581,7 +1581,7 @@ snapshots:
       espree: 11.2.0
       picomatch: 4.0.7
     optionalDependencies:
-      oxlint: 1.93.0(oxlint-tsgolint@7.0.2007)
+      oxlint: 1.94.0(oxlint-tsgolint@7.0.2007)
 
   '@types/chrome@0.3.7':
     dependencies:
