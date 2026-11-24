@@ -44,6 +44,24 @@ jobs:
                       exit 1
                   fi
 
+            - name: Guard customized plugins against deletion
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  # A raw upstream conflict candidate is not a merged tree yet.
+                  if ! git merge-base --is-ancestor origin/custom-plugins HEAD; then
+                      echo 'Sync branch does not contain current custom-plugins; merge the base before validating.'
+                      exit 1
+                  fi
+                  for file in src/plugins/splitLargeMessages/index.ts src/plugins/showHiddenChannels/index.tsx; do
+                      test -f "$file" || { echo "::error::Missing fork-critical plugin: $file"; exit 1; }
+                  done
+                  deleted="$(git diff --name-only --diff-filter=D origin/custom-plugins HEAD -- src/plugins/splitLargeMessages src/plugins/showHiddenChannels)"
+                  if [[ -n "$deleted" ]]; then
+                      printf '::error::Customized plugin files deleted:\n%s\n' "$deleted"
+                      exit 1
+                  fi
+
             - name: Set up pnpm
               uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
