@@ -116,6 +116,17 @@ jobs:
                       echo "ready=false" >> "$GITHUB_OUTPUT"
                   fi
 
+            - name: Preserve fork pull request template
+              if: steps.upstream.outputs.changed == 'true' && (steps.merge.outputs.ready == 'true' || steps.merge.outputs.ready == 'false')
+              shell: bash
+              env:
+                  BASE_SHA: ${{ steps.upstream.outputs.base_sha }}
+              run: |
+                  git restore --source="$BASE_SHA" --staged --worktree -- .github/pull_request_template.md
+                  if ! git diff --cached --quiet -- .github/pull_request_template.md; then
+                      git commit -m "chore(sync): preserve fork pull request template" -- .github/pull_request_template.md
+                  fi
+
             - name: Set up pnpm
               if: steps.merge.outputs.ready == 'true'
               uses: pnpm/action-setup@v6
